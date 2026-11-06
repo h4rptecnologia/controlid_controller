@@ -8,6 +8,7 @@ export function AppShell() {
   const me = useMe()
   const showSites = canAnywhere(me.grants, Permission.SitesRead) || canTenantWide(me.grants, Permission.SitesWrite)
   const showAudit = canTenantWide(me.grants, Permission.AuditRead)
+  const showImports = canAnywhere(me.grants, Permission.ImportCreate) || canAnywhere(me.grants, Permission.ImportApprove)
 
   async function leave() {
     await signOut().catch(() => undefined)
@@ -37,6 +38,11 @@ export function AppShell() {
           {showSites && (
             <li>
               <Link to="/unidades">Unidades</Link>
+            </li>
+          )}
+          {showImports && (
+            <li>
+              <Link to="/importacoes">Importações</Link>
             </li>
           )}
           {showAudit && (

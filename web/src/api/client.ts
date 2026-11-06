@@ -65,6 +65,18 @@ export async function apiPost<T>(path: string, body: unknown, idempotencyKey: st
   return (await response.json()) as T
 }
 
+/** Envia o arquivo como veio, sem chave de idempotencia: quem protege e a transicao de estado no servidor. */
+export async function apiPutBinary(path: string, content: Blob): Promise<void> {
+  const response = await send(path, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/octet-stream', 'X-Hub-Csrf': '1' },
+    body: content,
+  })
+  if (!response.ok) {
+    throw await toError(response)
+  }
+}
+
 /** A sessao local termina mesmo que o provedor redirecione; o redirecionamento nao e seguido aqui. */
 export async function signOut(): Promise<void> {
   await send('/auth/logout', { method: 'POST', redirect: 'manual', headers: { 'X-Hub-Csrf': '1' } })

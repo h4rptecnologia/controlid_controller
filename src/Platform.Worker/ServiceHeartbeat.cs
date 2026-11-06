@@ -37,6 +37,39 @@ internal sealed class ServiceHeartbeat(IServiceProvider services, ILogger<Servic
     }
 }
 
+/// <summary>Atende a fila de previas. Mesma regra: uma falha nao derruba o processo.</summary>
+internal sealed class ImportPreviewWorker(ImportPreviewService previews, ILogger<ImportPreviewWorker> logger) : BackgroundService
+{
+    private static readonly TimeSpan IdleDelay = TimeSpan.FromSeconds(3);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (await previews.ProcessNextAsync(stoppingToken))
+                {
+                    continue;
+                }
+            }
+            catch (Npgsql.NpgsqlException)
+            {
+                logger.LogWarning("Banco indisponivel; nova tentativa de previa em instantes.");
+            }
+
+            try
+            {
+                await Task.Delay(IdleDelay, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation("Previas encerrando.");
+            }
+        }
+    }
+}
+
 internal sealed class IdleWithoutScanner(ILogger<IdleWithoutScanner> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

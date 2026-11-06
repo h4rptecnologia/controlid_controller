@@ -100,6 +100,13 @@ public static class SourceAnalyzer
         return new SourceAnalysis(SourceFormats.UnknownArchive, ParserStatuses.NeedsManualMapping, null, null, 0, 0, 0, 0, images, null);
     }
 
+    /// <summary>O unico CSV da raiz, se o ZIP tiver a estrutura documentada. Mesma regra da analise.</summary>
+    internal static ZipArchiveEntry? DocumentedCsvEntry(ZipArchive archive)
+    {
+        var others = archive.Entries.Where(e => !e.FullName.EndsWith('/') && !e.FullName.StartsWith(ImagesFolder, StringComparison.Ordinal)).ToList();
+        return others.Count == 1 && NativeCsvNames.ContainsKey(others[0].FullName) ? others[0] : null;
+    }
+
     /// <summary>Confere a assinatura, sem decodificar a imagem. Conteudo corrompido conta como invalido.</summary>
     private static async Task<int> CountInvalidImagesAsync(List<ZipArchiveEntry> files, CancellationToken cancellationToken)
     {
@@ -127,7 +134,7 @@ public static class SourceAnalyzer
         return invalid;
     }
 
-    private static string? FlatObjectOf(string format) => format switch
+    internal static string? FlatObjectOf(string format) => format switch
     {
         SourceFormats.Users => "users",
         SourceFormats.LogsZip or SourceFormats.Tabular => "access_logs",
@@ -249,7 +256,7 @@ public static class SourceAnalyzer
             new(format, ParserStatuses.Unreadable, encodingName, delimiterName, 0, 0, 0, 0, images, code, invalidImages);
     }
 
-    private sealed class NonDisposingStream(Stream inner) : Stream
+    internal sealed class NonDisposingStream(Stream inner) : Stream
     {
         public override bool CanRead => inner.CanRead;
 

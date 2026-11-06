@@ -45,6 +45,8 @@ builder.Services.AddSingleton<ITenantDatabase, TenantDatabase>();
 builder.Services.AddScoped<RequestAccess>();
 builder.Services.AddSingleton(builder.Configuration.GetSection("Inspection").Get<InspectionLimits>() ?? new InspectionLimits());
 
+builder.Services.AddSingleton(builder.Configuration.GetSection("ImportApproval").Get<ImportApprovalOptions>() ?? new ImportApprovalOptions());
+
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresReadinessCheck>("postgres", tags: ["ready"]);
 builder.Services.AddHubStorage(builder.Configuration, builder.Environment);
@@ -82,6 +84,7 @@ app.MapFleetEndpoints();
 app.MapEventQueryEndpoints();
 app.MapBackfillEndpoints();
 app.MapImportEndpoints();
+app.MapImportRunEndpoints();
 app.MapEdgeEndpoints();
 
 if (app.Environment.IsDevelopment())

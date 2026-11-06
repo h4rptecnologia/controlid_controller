@@ -4,6 +4,9 @@ export const Permission = {
   SitesRead: 'sites.read',
   SitesWrite: 'sites.write',
   AuditRead: 'tenant.audit.read',
+  ImportCreate: 'import.create',
+  ImportApprove: 'import.approve',
+  DeviceRead: 'device.read',
 } as const
 
 function applies(grant: Grant, permission: string): boolean {
