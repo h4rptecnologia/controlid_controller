@@ -1,0 +1,14 @@
+erDiagram
+    TENANTS ||--o{ SITES : contains
+    TENANTS ||--o{ PEOPLE : contains
+    SITES ||--o{ DEVICES : hosts
+    PEOPLE ||--o{ CREDENTIALS : owns
+    PEOPLE ||--o{ PERSON_DEVICE_LINKS : maps
+    DEVICES ||--o{ PERSON_DEVICE_LINKS : has
+    DEVICES ||--o{ DEVICE_OBJECT_SNAPSHOTS : observed
+    DEVICES ||--o{ ACCESS_EVENTS : emits
+    PEOPLE ||--o{ ACCESS_EVENTS : optionally_identifies
+    TENANTS ||--o{ IMPORT_JOBS : imports
+    IMPORT_JOBS ||--o{ IMPORT_ITEMS : stages
+    DEVICES ||--o{ DEVICE_COMMANDS : accepts
+    TENANTS ||--o{ AUDIT_EVENTS : records

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Platform.Api\Platform.Api.csproj" />
+    <ProjectReference Include="..\..\src\Platform.EdgeGateway\Platform.EdgeGateway.csproj" />
+    <ProjectReference Include="..\..\src\Platform.Migrator\Platform.Migrator.csproj" />
+    <ProjectReference Include="..\contract\Platform.ContractTests.csproj" />
+    <ProjectReference Include="..\..\src\Shared\Storage\Platform.Shared.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

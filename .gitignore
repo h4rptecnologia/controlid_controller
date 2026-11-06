@@ -1,0 +1,15 @@
+bin/
+obj/
+node_modules/
+dist/
+coverage/
+TestResults/
+*.user
+.vs/
+.vscode/
+.env
+.env.*
+!.env.example
+*.pfx
+*.key
+*.pem

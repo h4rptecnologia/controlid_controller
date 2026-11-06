@@ -1,0 +1,15 @@
+stateDiagram-v2
+    [*] --> uploaded
+    uploaded --> quarantined
+    quarantined --> rejected: Malware ou formato invalido
+    quarantined --> validated: Integridade confirmada
+    validated --> staged
+    staged --> review_required
+    review_required --> rejected: Recusada
+    review_required --> approved: Aprovação autorizada
+    approved --> processing
+    processing --> partially_completed: Falhas por item
+    processing --> completed
+    partially_completed --> completed: Reprocessamento dos pendentes
+    rejected --> [*]
+    completed --> [*]

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Modules\IdentityTenancy\Platform.Modules.IdentityTenancy.csproj" />
+    <ProjectReference Include="..\Modules\Fleet\Platform.Modules.Fleet.csproj" />
+    <ProjectReference Include="..\Modules\Governance\Platform.Modules.Governance.csproj" />
+    <ProjectReference Include="..\Shared\Kernel\Platform.Shared.Kernel.csproj" />
+    <ProjectReference Include="..\Shared\Storage\Platform.Shared.Storage.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Platform.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

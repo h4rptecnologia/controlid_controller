@@ -1,0 +1,13 @@
+# Varredura de segredos. O allowlist cobre so saidas de build e o .env local, que o .gitignore ja exclui.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Artefatos gerados e configuracao local fora do versionamento"
+paths = [
+  '''(^|/)bin/''',
+  '''(^|/)obj/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)dist/''',
+  '''(^|/)\.env$''',
+]

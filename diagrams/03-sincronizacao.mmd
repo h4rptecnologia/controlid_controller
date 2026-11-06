@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor Admin as Administrador
+    participant API as Hub API
+    participant DB as PostgreSQL
+    participant Q as Fila/Worker
+    participant EDGE as Gateway
+    participant CID as Control iD
+    Admin->>API: Alterar regra ou pessoa
+    API->>DB: Registrar desired state e outbox
+    API-->>Admin: 202 Accepted + jobId
+    Q->>DB: Ler plano de sincronização
+    Q->>EDGE: Aplicar diff permitido
+    EDGE->>CID: Chamada .fcgi autenticada
+    alt resposta inequívoca
+        CID-->>EDGE: Resultado
+        EDGE->>CID: Readback
+        CID-->>EDGE: Estado observado
+        EDGE-->>Q: Evidência + status
+        Q->>DB: observed state e audit
+    else timeout ou erro
+        EDGE-->>Q: Resultado incerto
+        Q->>DB: Marcar requires_reconcile
+    end

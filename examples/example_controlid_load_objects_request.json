@@ -1,0 +1,12 @@
+{
+  "_example_only": true,
+  "object": "users",
+  "fields": [
+    "id",
+    "name",
+    "registration"
+  ],
+  "limit": 100,
+  "offset": 0,
+  "warning": "Illustrative request; validate exact firmware contract."
+}

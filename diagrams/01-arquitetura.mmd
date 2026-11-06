@@ -1,0 +1,16 @@
+flowchart LR
+    U[Usuario web] --> FE[Frontend React]
+    FE --> API[API .NET 10]
+    API --> PG[(PostgreSQL)]
+    API --> S3[(Storage cifrado)]
+    API --> KMS[Vault ou KMS]
+    API --> OUT[(Outbox / Fila)]
+    OUT --> WRK[Workers de Sync / Import]
+    WRK --> GW[Gateway Edge]
+    GW <-->|HTTPS na LAN| DEV[Terminais Control iD]
+    DEV -->|Monitor / Push / Pro| GW
+    GW --> ING[Receptor de eventos]
+    ING --> OUT
+    FILE[ZIP, CSV ou pacote cifrado] --> API
+    API --> OBS[Auditoria + Observabilidade]
+    WRK --> OBS

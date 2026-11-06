@@ -1,0 +1,11 @@
+{
+  "_example_only": true,
+  "action": "sync_desired_state",
+  "device_id": "<DEVICE_UUID>",
+  "entity": "users",
+  "operation": "upsert",
+  "idempotency_key": "<UUID>",
+  "approval_required": false,
+  "status": "queued",
+  "warning": "Not Control iD native API request."
+}

@@ -1,0 +1,62 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Platform.Api/Platform.Api.csproj" />
+    <Project Path="src/Platform.EdgeGateway/Platform.EdgeGateway.csproj" />
+    <Project Path="src/Platform.Migrator/Platform.Migrator.csproj" />
+    <Project Path="src/Platform.Worker/Platform.Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/AccessPolicy/">
+    <Project Path="src/Modules/AccessPolicy/Platform.Modules.AccessPolicy.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Credentials/">
+    <Project Path="src/Modules/Credentials/Platform.Modules.Credentials.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/DeviceIntegration.ControlId/">
+    <Project Path="src/Modules/DeviceIntegration.ControlId/Platform.Modules.DeviceIntegration.ControlId.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Events/">
+    <Project Path="src/Modules/Events/Platform.Modules.Events.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Fleet/">
+    <Project Path="src/Modules/Fleet/Platform.Modules.Fleet.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Governance/">
+    <Project Path="src/Modules/Governance/Platform.Modules.Governance.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/IdentityTenancy/">
+    <Project Path="src/Modules/IdentityTenancy/Platform.Modules.IdentityTenancy.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Importation/">
+    <Project Path="src/Modules/Importation/Platform.Modules.Importation.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/People/">
+    <Project Path="src/Modules/People/Platform.Modules.People.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/PhysicalActions/">
+    <Project Path="src/Modules/PhysicalActions/Platform.Modules.PhysicalActions.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Sync/">
+    <Project Path="src/Modules/Sync/Platform.Modules.Sync.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/" />
+  <Folder Name="/src/Shared/Contracts/">
+    <Project Path="src/Shared/Contracts/Platform.Shared.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/Kernel/">
+    <Project Path="src/Shared/Kernel/Platform.Shared.Kernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/Storage/">
+    <Project Path="src/Shared/Storage/Platform.Shared.Storage.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/contract/">
+    <Project Path="tests/contract/Platform.ContractTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/integration/">
+    <Project Path="tests/integration/Platform.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/unit/">
+    <Project Path="tests/unit/Platform.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,18 @@
+{
+  "_example_only": true,
+  "source": "file",
+  "entity": "users",
+  "source_user_id": "12345",
+  "candidates": [
+    {
+      "id": "<PERSON_UUID_A>",
+      "reason": "registration_match"
+    },
+    {
+      "id": "<PERSON_UUID_B>",
+      "reason": "same_name_only"
+    }
+  ],
+  "resolution": "manual_review",
+  "automerge": false
+}

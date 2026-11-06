@@ -1,0 +1,14 @@
+flowchart TB
+    C[Credencial apresentada] --> M{Modo configurado}
+    M -->|Standalone| L[Identifica e autoriza no terminal]
+    M -->|Pro| P[Terminal identifica; servidor autoriza]
+    M -->|Enterprise| E[Servidor identifica e autoriza
+Exige motor biometrico homologado]
+    P --> F{Servidor respondeu dentro do SLA?}
+    E --> F
+    F -->|Sim| R[Aplicar decisao autenticada]
+    F -->|Nao| CONT[Politica de contingencia
+validada no hardware]
+    L --> LOG[Registrar evento]
+    R --> LOG
+    CONT --> LOG

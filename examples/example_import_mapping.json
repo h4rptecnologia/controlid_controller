@@ -1,0 +1,20 @@
+{
+  "_example_only": true,
+  "source_format": "controlid-v6-csv",
+  "entity": "users",
+  "file": "users.csv",
+  "mapping": {
+    "id": "source_user_id",
+    "name": "display_name",
+    "registration": "registration_code"
+  },
+  "resolution": {
+    "match_policy": "external_id_and_device",
+    "on_ambiguous": "manual_review",
+    "delete_absent": false
+  },
+  "pii_protection": {
+    "encrypt_raw": true,
+    "mask_ui": true
+  }
+}

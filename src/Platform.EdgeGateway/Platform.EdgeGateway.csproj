@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Modules\DeviceIntegration.ControlId\Platform.Modules.DeviceIntegration.ControlId.csproj" />
+    <ProjectReference Include="..\Shared\Contracts\Platform.Shared.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,47 @@
+{
+  "version": 2,
+  "dependencies": {
+    "net10.0": {
+      "AWSSDK.Core": {
+        "type": "Transitive",
+        "resolved": "4.0.102.18",
+        "contentHash": "NjdKTry9Jqm0jGM7Af8TxzDi01MmWmjbGDnc4178S2w6A8b1pSCU0enBEcRoHpyXLafHJUewqeetu+fep1l/pw=="
+      },
+      "platform.shared.kernel": {
+        "type": "Project",
+        "dependencies": {
+          "Dapper": "[2.1.89, )",
+          "Npgsql": "[10.0.3, )"
+        }
+      },
+      "platform.shared.storage": {
+        "type": "Project",
+        "dependencies": {
+          "AWSSDK.S3": "[4.0.104.10, )",
+          "Platform.Shared.Kernel": "[1.0.0, )"
+        }
+      },
+      "AWSSDK.S3": {
+        "type": "CentralTransitive",
+        "requested": "[4.0.104.10, )",
+        "resolved": "4.0.104.10",
+        "contentHash": "clyJoY9Kvy7By4QMRkuXbwRGjamYpNCBmgubBur4FKk0kPuSDqq8sNFggIK//S3VJrdHDg/ZnJPqElU6FuBpoA==",
+        "dependencies": {
+          "AWSSDK.Core": "[4.0.102.18, 5.0.0)"
+        }
+      },
+      "Dapper": {
+        "type": "CentralTransitive",
+        "requested": "[2.1.89, )",
+        "resolved": "2.1.89",
+        "contentHash": "1VjFE664wnxvuhlgP8kS4PeFFF4jqD3VkbIHW6Zlc52zuibgcz5ICnIHcQXlTp6pURpPNGLV0ZpNe5x9KePJnA=="
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
+      }
+    }
+  }
+}

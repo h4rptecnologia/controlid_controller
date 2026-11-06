@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\Kernel\Platform.Shared.Kernel.csproj" />
+    <ProjectReference Include="..\..\Shared\Storage\Platform.Shared.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

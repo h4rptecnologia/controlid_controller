@@ -1,0 +1,27 @@
+{
+  "_example_only": true,
+  "schema": "com.example.controlid.hub-encrypted-export.v1",
+  "version": 1,
+  "cipher": "AES-256-GCM",
+  "key_wrap": "KMS-ENVELOPE",
+  "tenant": "<TENANT_UUID>",
+  "package_id": "<PACKAGE_UUID>",
+  "aad_fields": [
+    "tenant",
+    "package_id",
+    "schema",
+    "content_type"
+  ],
+  "chunks": [
+    {
+      "name": "objects.jsonl.enc",
+      "encrypted": true,
+      "digest_sha256": "<HEX_HASH>",
+      "wrapped_dek": "<KMS_OUTPUT>",
+      "nonce_base64": "<BASE64_NONCE>",
+      "tag_base64": "<BASE64_TAG>",
+      "aad_base64": "<BASE64_AAD>"
+    }
+  ],
+  "warning": "Illustrative metadata, NOT a ready interoperable cryptographic format. Never use these placeholders as keys."
+}

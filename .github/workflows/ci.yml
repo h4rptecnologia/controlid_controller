@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - run: dotnet restore ControlIdHub.slnx --locked-mode
+      - run: dotnet format ControlIdHub.slnx --verify-no-changes --no-restore
+      - run: dotnet build ControlIdHub.slnx -c Release --no-restore
+      # Testcontainers usa o Docker do runner: RLS e migracoes rodam em PostgreSQL real.
+      - run: dotnet test ControlIdHub.slnx -c Release --no-build --logger trx --results-directory TestResults
+      - run: dotnet list ControlIdHub.slnx package --vulnerable --include-transitive
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results
+          path: TestResults
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run lint
+      # Falha se os tipos gerados nao corresponderem ao contrato versionado.
+      - run: npm run api:types && git diff --exit-code src/api/schema.d.ts
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - run: npm audit --audit-level=high
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: anchore/sbom-action@fffec3d851af758d56fee099cf3fbf8aa8779843 # v0.24.3
+        with:
+          format: cyclonedx-json
+          artifact-name: sbom.cdx.json
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t hub/web:ci web
+      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Api --build-arg BASE=aspnet -t hub/api:ci .
+      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Worker --build-arg BASE=runtime -t hub/worker:ci .
+      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.EdgeGateway --build-arg BASE=aspnet -t hub/edge:ci .
+      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Migrator --build-arg BASE=aspnet -t hub/migrator:ci .

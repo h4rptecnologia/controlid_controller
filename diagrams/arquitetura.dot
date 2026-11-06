@@ -1,0 +1,31 @@
+digraph ControlID {
+ graph [fontname="DejaVu Sans", bgcolor="#fbfcff", rankdir=LR, pad=0.42, nodesep=0.55, ranksep=0.83, splines=polyline, label="Arquitetura de Referência • Plataforma Control iD", labelloc=t, fontsize=22, fontcolor="#132641"];
+ node [shape=box, style="rounded,filled", fillcolor="#ffffff", color="#cad6e4", penwidth=1.4, fontname="DejaVu Sans", fontsize=12, fontcolor="#182c43", margin="0.22,0.17"];
+ edge [color="#6486a4", penwidth=1.5, arrowsize=0.7, fontname="DejaVu Sans", fontsize=10, fontcolor="#465d70"];
+ Operador [label="Operador / Admin\nOIDC + MFA", fillcolor="#eaf4ff"];
+ subgraph cluster_hub { label="Plataforma central • Cloud ou on-premises"; color="#92b2d1"; fillcolor="#f1f7ff"; style="rounded,filled"; penwidth=1.5;
+ UI [label="Frontend\nReact + TypeScript", fillcolor="#e4ecff"];
+ API [label="API modular\nASP.NET Core", fillcolor="#e4ecff"];
+ DB [label="PostgreSQL\nRLS • Dados • Eventos", shape=cylinder, fillcolor="#eaf2ff"];
+ BLOB [label="Storage cifrado\nArquivo e biometria", shape=cylinder, fillcolor="#eaf2ff"];
+ KMS [label="KMS / Vault\nEnvelope Encryption", fillcolor="#fff0d5"];
+ Q [label="Outbox / Filas\nJobs e reprocesso", fillcolor="#fff0d5"];
+ WORKER [label="Workers\nSync • Importação • Logs", fillcolor="#ebf7ef"];
+ ING [label="Ingress\nEventos • Monitor • Push", fillcolor="#ebf7ef"];
+ AUDIT [label="Auditoria +\nObservabilidade", fillcolor="#fff0d5"];
+ }
+ subgraph cluster_edge { label="Rede local protegida"; style="rounded,filled"; color="#9cbfa5"; fillcolor="#f3faf5";
+ GATEWAY [label="Edge Gateway\nIdentidade mTLS", fillcolor="#e0f3e6"];
+ DEV [label="Control iD\niDFace / iDAccess / outros\n(conforme modelo/firmware)", fillcolor="#e0f3e6"];
+ }
+ FILE [label="Arquivo original\nZIP / CSV / cifra", fillcolor="#ffebdc"];
+ Operador -> UI -> API;
+ API -> DB; API -> BLOB; API -> KMS; API -> Q; Q -> WORKER;
+ WORKER -> GATEWAY [label="Comando permitido"];
+ GATEWAY -> DEV [label="HTTPS na LAN"];
+ DEV -> GATEWAY [label="Eventos / resultado", color="#26815d", constraint=false];
+ GATEWAY -> ING [label="Canal seguro",color="#26815d",constraint=false];
+ ING -> Q [label="Dedup + persistência",constraint=false];
+ FILE -> API [label="Upload + quarentena"];
+ API -> AUDIT [constraint=false]; WORKER -> AUDIT [constraint=false];
+}

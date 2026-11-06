@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    actor O as Operador
+    participant UI as Interface
+    participant API as API
+    participant FS as Quarentena cifrada
+    participant PAR as Parser isolado
+    participant DB as PostgreSQL
+    O->>UI: Seleciona arquivo e finalidade
+    UI->>API: Upload com autorização
+    API->>FS: Grava original + hash
+    API->>PAR: Validar, scanner, limites ZIP
+    PAR-->>API: Tipo e estrutura V5/V6
+    API->>DB: Salvar staging e diff
+    API-->>UI: Prévia e conflitos
+    O->>UI: Mapeia e aprova
+    UI->>API: Confirmar importação
+    API->>DB: Commit por chunks + outbox
+    API-->>UI: Relatório e rastreabilidade
