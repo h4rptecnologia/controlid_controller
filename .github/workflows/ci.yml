@@ -3,7 +3,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -68,6 +68,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: docker build -t hub/web:ci web
       - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Api --build-arg BASE=aspnet -t hub/api:ci .
-      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Worker --build-arg BASE=runtime -t hub/worker:ci .
+      - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Worker --build-arg BASE=aspnet -t hub/worker:ci .
       - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.EdgeGateway --build-arg BASE=aspnet -t hub/edge:ci .
       - run: docker build -f infra/docker/dotnet.Dockerfile --build-arg PROJECT=Platform.Migrator --build-arg BASE=aspnet -t hub/migrator:ci .

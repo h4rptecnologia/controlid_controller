@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Platform.Api\Platform.Api.csproj" />
     <ProjectReference Include="..\..\src\Platform.EdgeGateway\Platform.EdgeGateway.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Importation\Platform.Modules.Importation.csproj" />
     <ProjectReference Include="..\..\src\Platform.Migrator\Platform.Migrator.csproj" />
     <ProjectReference Include="..\contract\Platform.ContractTests.csproj" />
     <ProjectReference Include="..\..\src\Shared\Storage\Platform.Shared.Storage.csproj" />

@@ -858,6 +858,35 @@ public sealed class EdgeGatewayTests : IDisposable
     }
 
     [Fact]
+    public async Task Site_scoped_manager_cannot_write_in_another_site_of_the_same_tenant()
+    {
+        // Mesmo tenant: o RLS nao separa unidades, so a checagem de escopo.
+        var tenant = await data.TenantAsync();
+        var mine = await data.SiteAsync(tenant.Id, "Minha");
+        var other = await data.SiteAsync(tenant.Id, "Outra");
+        var admin = stack.AdminClient(await data.ActorAsync(tenant, AllPermissions));
+        var otherGateway = await CreateGatewayAsync(admin, other);
+        var otherDevice = await CreateDeviceAsync(admin, other, otherGateway);
+
+        var scoped = await data.ActorAsync(tenant);
+        foreach (var permission in AllPermissions)
+        {
+            await data.GrantAsync(scoped, permission, mine);
+        }
+
+        var client = stack.AdminClient(scoped);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(Url("/api/v1/gateways"), new { siteId = other, name = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(Url($"/api/v1/gateways/{otherGateway}/enrollment-token"), null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(Url($"/api/v1/gateways/{otherGateway}/revoke"), null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(Url("/api/v1/devices"), new { siteId = other, gatewayId = otherGateway, name = "x", host = "10.0.0.1", port = 443, tlsPin = new string('A', 64) })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync(Url($"/api/v1/devices/{otherDevice}/credential"), new { login = "a", password = "b" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync(Url($"/api/v1/devices/{otherDevice}/probe"), null)).StatusCode);
+        Assert.Equal(0L, await data.ScalarAsync<long>("SELECT count(*) FROM hub.devices WHERE id = @otherDevice AND secret_ref IS NOT NULL", new { otherDevice }));
+        Assert.Equal("pending", await data.ScalarAsync<string>("SELECT status FROM hub.edge_gateways WHERE id = @otherGateway", new { otherGateway }));
+    }
+
+    [Fact]
     public async Task Setting_a_new_credential_destroys_the_previous_one()
     {
         var (_, site, admin) = await TenantWithAdminAsync();

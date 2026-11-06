@@ -6,6 +6,8 @@
 
 Em construção. Entregas em `docs/entregas/`; como rodar em `docs/runbooks/ambiente-local.md`. **Nenhum equipamento foi homologado** (`docs/capability-matrix/README.md`).
 
+O CI roda em `main` e `develop` desde 06/11/2026. As entregas anteriores a essa data dizem "CI nunca executado", o que valia quando foram escritas.
+
 ## Objetivo
 
 Construir uma plataforma web segura, auditável, multiunidade e preparada para múltiplos clientes (tenants), com **PostgreSQL como banco operacional**, capaz de absorver e gerenciar dados dos equipamentos de **controle de acesso** Control iD tanto **pela API do equipamento** quanto **por arquivos exportados**, operar regras de acesso, acompanhar eventos, administrar dispositivos e produzir relatórios. O sistema deverá ser simples para operadores comuns, sem perder profundidade de administração.

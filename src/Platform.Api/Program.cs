@@ -6,6 +6,7 @@ using Platform.Api.Hosting;
 using Platform.Modules.Fleet;
 using Platform.Modules.Governance;
 using Platform.Modules.IdentityTenancy;
+using Platform.Modules.Importation;
 using Platform.Shared.Kernel.Authorization;
 using Platform.Shared.Kernel.Data;
 using Platform.Shared.Kernel.Http;
@@ -42,6 +43,7 @@ builder.Services.AddSingleton(provider =>
         ?? throw new InvalidOperationException("ConnectionStrings:Hub nao configurada.")));
 builder.Services.AddSingleton<ITenantDatabase, TenantDatabase>();
 builder.Services.AddScoped<RequestAccess>();
+builder.Services.AddSingleton(builder.Configuration.GetSection("Inspection").Get<InspectionLimits>() ?? new InspectionLimits());
 
 builder.Services.AddHealthChecks()
     .AddCheck<PostgresReadinessCheck>("postgres", tags: ["ready"]);
@@ -79,6 +81,7 @@ app.MapAuditEndpoints();
 app.MapFleetEndpoints();
 app.MapEventQueryEndpoints();
 app.MapBackfillEndpoints();
+app.MapImportEndpoints();
 app.MapEdgeEndpoints();
 
 if (app.Environment.IsDevelopment())

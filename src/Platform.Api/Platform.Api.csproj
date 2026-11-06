@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Modules\IdentityTenancy\Platform.Modules.IdentityTenancy.csproj" />
+    <ProjectReference Include="..\Modules\Importation\Platform.Modules.Importation.csproj" />
     <ProjectReference Include="..\Modules\Fleet\Platform.Modules.Fleet.csproj" />
     <ProjectReference Include="..\Modules\Governance\Platform.Modules.Governance.csproj" />
     <ProjectReference Include="..\Shared\Kernel\Platform.Shared.Kernel.csproj" />

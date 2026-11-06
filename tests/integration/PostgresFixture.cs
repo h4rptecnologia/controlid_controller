@@ -12,11 +12,14 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     private readonly string appPassword = Guid.NewGuid().ToString("N");
     private readonly string ownerPassword = Guid.NewGuid().ToString("N");
+    private readonly string workerPassword = Guid.NewGuid().ToString("N");
     private readonly PostgreSqlContainer container = new PostgreSqlBuilder(Image).Build();
 
     public string AdminConnection => container.GetConnectionString();
 
     public string AppConnection => For("app_api", appPassword);
+
+    public string WorkerImportConnection => For("worker_import", workerPassword);
 
     public string OwnerConnection => For(DatabaseBootstrapper.MigrationOwner, ownerPassword);
 
@@ -29,6 +32,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             [DatabaseBootstrapper.MigrationOwner] = ownerPassword,
             ["app_api"] = appPassword,
+            ["worker_import"] = workerPassword,
         });
 
         var result = await MigrationRunner.RunAsync(OwnerConnection);

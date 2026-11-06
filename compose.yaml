@@ -103,6 +103,11 @@ services:
       Storage__SecretKey: ${HUB_S3_SECRET_KEY}
       Storage__CreateBucketIfMissing: "true"
 
+  # Antivirus opcional: baixa as assinaturas ao subir e demora alguns minutos para ficar pronto.
+  scanner:
+    profiles: [scanner]
+    image: clamav/clamav:stable@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+
   web:
     build:
       context: web
@@ -114,11 +119,20 @@ services:
     build:
       context: .
       dockerfile: infra/docker/dotnet.Dockerfile
-      args: { PROJECT: Platform.Worker, BASE: runtime }
+      args: { PROJECT: Platform.Worker, BASE: aspnet }
     image: controlid-hub/worker:dev
     depends_on: { db-migrate: { condition: service_completed_successfully } }
     environment:
-      ConnectionStrings__Hub: Host=postgres;Database=hub;Username=worker_sync;Password=${HUB_PASSWORD_WORKER_SYNC};GSS Encryption Mode=Disable
+      DOTNET_ENVIRONMENT: Development
+      ConnectionStrings__Hub: Host=postgres;Database=hub;Username=worker_import;Password=${HUB_PASSWORD_WORKER_IMPORT};GSS Encryption Mode=Disable
+      Kms__Address: http://kms:8200
+      Kms__Token: ${HUB_KMS_DEV_TOKEN}
+      Storage__ServiceUrl: http://object-storage:9000
+      Storage__Bucket: hub-dev
+      Storage__AccessKey: ${HUB_S3_ACCESS_KEY}
+      Storage__SecretKey: ${HUB_S3_SECRET_KEY}
+      # Sem scanner, nada sai da quarentena. Exemplo: docker compose --profile scanner up
+      Scanner__Host: ${HUB_SCANNER_HOST:-}
 
 volumes:
   pgdata:
