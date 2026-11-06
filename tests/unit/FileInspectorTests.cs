@@ -299,12 +299,42 @@ public sealed class FileInspectorTests
     [Fact]
     public async Task Expired_inspection_is_refused_instead_of_accepted()
     {
-        var limits = new InspectionLimits { MaxDuration = TimeSpan.Zero, MaxEntries = 50, MaxUncompressedBytes = 1024 * 1024, MaxEntryBytes = 1024 * 1024, MaxExpansionRatio = 1000 };
+        // Prazo zero nao bastava: o cancelamento e assincrono, e sob carga um arquivo pequeno terminava antes dele.
+        // Cada leitura lenta garante que o trabalho dure mais do que o prazo.
+        var limits = new InspectionLimits { MaxDuration = TimeSpan.FromMilliseconds(1), MaxEntries = 50, MaxUncompressedBytes = 1024 * 1024, MaxEntryBytes = 1024 * 1024, MaxExpansionRatio = 1000 };
         var entries = Enumerable.Range(0, 40).Select(i => ($"f{i}.bin", Random(8192))).ToArray();
+        await using var slow = new SlowReadStream(Zip(entries), TimeSpan.FromMilliseconds(5));
 
-        var result = await Inspect(Zip(entries), limits);
+        var result = await FileInspector.InspectAsync(slow, limits, CancellationToken.None);
 
         Assert.Equal(RejectionCodes.Timeout, result.RejectionCode);
+    }
+
+    private sealed class SlowReadStream(byte[] content, TimeSpan delay) : MemoryStream(content)
+    {
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Thread.Sleep(delay);
+            return base.Read(buffer, offset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            Thread.Sleep(delay);
+            return base.Read(buffer);
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return await base.ReadAsync(buffer.AsMemory(offset, count), cancellationToken);
+        }
     }
 
     private static void PatchCentralDirectory(byte[] file, Action<int> patch)

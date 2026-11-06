@@ -219,11 +219,11 @@ public sealed class SourceAnalyzerTests
 
     private static byte[] Text(string value) => Encoding.UTF8.GetBytes(value);
 
+    // users.csv com estas colunas ja e interpretado: veja NativeCsvParserTests.
     [Theory]
-    [InlineData("users.csv", SourceFormats.Users)]
     [InlineData("sync.csv", SourceFormats.Sync)]
     [InlineData("backup.csv", SourceFormats.Backup)]
-    public async Task Documented_structure_is_recognized_but_still_needs_manual_mapping(string name, string format)
+    public async Task Documented_structure_without_object_sections_still_needs_manual_mapping(string name, string format)
     {
         using var zip = Zip((name, Text("id;name\n1;MARCADORPESSOAL\n")), ("user_images/1.jpg", [1, 2, 3]));
 

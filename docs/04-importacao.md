@@ -33,6 +33,7 @@ Estados laterais: `rejected`, `cancelled`, `failed`, `partial`, `rolled_back`, `
 ### 3. Identificar, decodificar, validar
 
 - Extrair em sandbox, sem escrita fora da pasta temporária; para cada tipo de exportação nativa, selecionar parser `controlid_v5_*` ou `controlid_v6_*` por conteúdo e evidência. Em caso de ambiguidade, colocar `needs_manual_mapping`.
+  - **Situação atual:** a documentação do fabricante não descreve o layout do CSV nem o que difere entre V5 e V6, então há um único perfil, `controlid_doc_v1`, escrito pela documentação, com `firmware_line = undetermined` e status `parsed_by_documentation`. Os perfis por linha nascem da suíte com arquivos reais (`tests/native-samples/README.md`).
 - Suportar BOM/UTF-8/CP1252 quando necessário, CRLF/LF, `;` ou `,` e campos citados; **jamais** fazer inferência destrutiva de CPF/IDs/zero à esquerda, muito menos `parseInt` em JS para UInt64.
 - Mapeamentos explícitos `source_object`, `source_key`, `source_field`, `target_field`, `transform_id`, `parser_version` e `confidence`, com versão e testes por exemplo. Tipos inesperados ficam em `import_row_error` e `raw_payload`, não somem.
 - Campos/objetos desconhecidos são preservados em `jsonb` de extensão, sem executar ou aplicar a equipamentos sem compatibilidade aprovada.

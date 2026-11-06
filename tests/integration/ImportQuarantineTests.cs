@@ -181,7 +181,93 @@ public sealed class ImportQuarantineTests(PostgresFixture postgres, StorageFixtu
         Assert.Equal(1, scanner.Calls);
         Assert.Equal(SourceFormats.Users, file.GetProperty("sourceFormat").GetString());
         Assert.Equal("undetermined", file.GetProperty("firmwareLine").GetString());
+        Assert.Equal(ParserStatuses.ParsedByDocumentation, file.GetProperty("parserStatus").GetString());
+    }
+
+    private static byte[] NativeUsersZip()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var csv = archive.CreateEntry("users.csv").Open())
+            {
+                csv.Write("""
+                    users
+                    id;registration;name;password;salt;COLUNAMARCADOR
+                    1;MARCADORMATRICULA;MARCADORNOME;MARCADORHASH;MARCADORSALT;MARCADOREXTRA
+                    cards
+                    id;value;user_id
+                    5;18446744073709551615;1
+                    6;18446744073709551614;99
+                    templates
+                    id;finger_type;template;user_id
+                    7;0;TUFSQ0FET1JCSU8=;1
+                    """u8);
+            }
+
+            using var image = archive.CreateEntry("user_images/1.jpg").Open();
+            image.Write(RandomNumberGenerator.GetBytes(64));
+        }
+
+        return buffer.ToArray();
+    }
+
+    [Fact]
+    public async Task Native_export_reaches_the_analysis_with_only_official_names_and_counts()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await UploadAsync(client, site, NativeUsersZip());
+
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+
+        var file = await GetAsync(client, id);
+        Assert.Equal("inspected", file.GetProperty("status").GetString());
+        Assert.Equal(SourceFormats.Users, file.GetProperty("sourceFormat").GetString());
+        Assert.Equal(ParserStatuses.ParsedByDocumentation, file.GetProperty("parserStatus").GetString());
+        Assert.Equal("undetermined", file.GetProperty("firmwareLine").GetString());
+
+        var analysis = file.GetProperty("analysis");
+        Assert.Equal(1, analysis.GetProperty("invalidImageEntries").GetInt32());
+        var native = analysis.GetProperty("native");
+        Assert.Equal(NativeCsvParser.ParserId, native.GetProperty("parserId").GetString());
+        Assert.Equal(1, native.GetProperty("pendingReferences").GetProperty("cards.user_id").GetInt64());
+
+        var objects = native.GetProperty("objects").EnumerateArray().ToDictionary(o => o.GetProperty("name").GetString()!);
+        Assert.Equal(1, objects["users"].GetProperty("rows").GetInt64());
+        Assert.Equal(2, objects["cards"].GetProperty("rows").GetInt64());
+        Assert.Equal(1, objects["templates"].GetProperty("rows").GetInt64());
+        Assert.Equal(1, objects["users"].GetProperty("unknownColumns").GetInt32());
+        Assert.Contains("password", objects["users"].GetProperty("sensitiveColumns").EnumerateArray().Select(c => c.GetString()));
+
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        foreach (var table in new[] { "import_files", "audit_log", "idempotency_keys" })
+        {
+            await using var command = new NpgsqlCommand(
+                $"SELECT count(*) FROM hub.{table} t WHERE t.tenant_id = @t AND (t::text LIKE '%MARCADOR%' OR t::text LIKE '%18446744073709551615%' OR t::text LIKE '%TUFSQ0FET1JCSU8%')",
+                connection);
+            command.Parameters.AddWithValue("t", tenant);
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Native_file_with_contradicting_objects_stops_at_manual_mapping()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var csv = archive.CreateEntry("sync.csv").Open();
+            csv.Write("users\nid;name\n1;Ana\naccess_logs\nid;time;event\n1;1;7\n"u8);
+        }
+
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await UploadAsync(client, site, buffer.ToArray());
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+
+        var file = await GetAsync(client, id);
         Assert.Equal(ParserStatuses.NeedsManualMapping, file.GetProperty("parserStatus").GetString());
+        Assert.Equal(AnalysisProblems.ObjectsContradictFormat, file.GetProperty("analysis").GetProperty("problem").GetString());
     }
 
     [Fact]

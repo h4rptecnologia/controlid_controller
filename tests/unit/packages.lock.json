@@ -122,6 +122,9 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "platform.modules.deviceintegration.controlid": {
+        "type": "Project"
+      },
       "platform.modules.importation": {
         "type": "Project",
         "dependencies": {

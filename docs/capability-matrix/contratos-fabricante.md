@@ -39,6 +39,12 @@ O fabricante não documenta estes pontos. O conector adota a opção mais segura
 | Código `event` de `alarm_logs` | 1 ativado, 2 desativado, pela ordem da lista | Idem |
 | Reset de fábrica | IDs recomeçam; detectado pela hora da linha do cursor ou por nenhuma linha a partir dele | Se o firmware mantiver ID e hora, o reset não é percebido. Se `load_objects` responder vazio durante o boot, abre época nova sem necessidade: duplica histórico, mas não perde |
 | `device_id` depois de reset | Mantido | Se mudar, os eventos passam a ser recusados até novo cadastro |
+| Layout do CSV exportado | Duas formas: seções marcadas pelo nome do objeto, seguido do cabeçalho, ou tabela única em `users.csv` e `logs.csv`. A página não descreve nenhuma | O arquivo real cai em mapeamento manual, sem perda, e o parser precisa ser ajustado |
+| Nomes das colunas do CSV | Iguais aos campos da Lista de Objetos, com a mesma grafia | Idem. Logs com cabeçalho traduzido, por exemplo, não seriam reconhecidos |
+| Delimitador do CSV | `;`, `,` ou tabulação. A página de relatório cita `;` e `,`, mas para `report_generate` | Idem |
+| Objetos em `users.csv` | A página cita usuários, digitais e cartões. Exigimos `users` e recusamos logs; os demais são aceitos | Um arquivo sem seção `users` iria para mapeamento manual |
+| Unicidade de `cards`, `qrcodes` e `uhf_tags` por `value` | Valor repetido é erro de linha | Se o firmware permitir repetição, surgem erros falsos, visíveis na prévia |
+| Diferença entre V5 e V6 | Desconhecida; `firmware_line` fica `undetermined` | Se os layouts divergirem, um perfil único não serve e será separado |
 | Valores de `type` em `access_events` | `TURN_LEFT`, `TURN_RIGHT`, `GIVE_UP`, `OPEN`, `CLOSE`, como na lista oficial | Outro valor fica `unknown` |
 
 ## Divergências na documentação
@@ -54,6 +60,10 @@ O fabricante não documenta estes pontos. O conector adota a opção mais segura
 | JSON do `catra_event` | O exemplo usa aspas simples em `name`, o que não é JSON válido | O gateway recusa com 400; confirmar o que o firmware envia |
 | JSON do `operation_mode` | O exemplo não tem vírgula depois de `last_offline` | Idem |
 | Tipos nos eventos | `device_id`, `time` e valores aparecem ora como número, ora como texto | Tudo guardado como texto exato |
+| ZIP de logs | A lista de arquivos cita `logs.zip`, enquanto o texto diz que a exportação gera `logs.csv` | Os dois são aceitos, pelo conteúdo |
+| ZIP de backup | A lista cita `users.zip`, `sync.zip` e `logs.zip`, sem nome para o ZIP do backup, embora exista `backup.csv` | Identificado pelo CSV interno; o nome do ZIP não é usado |
+| Formato de `export_objects` | A página descreve a requisição, mas não mostra a resposta | CSV sem ZIP só é tratado como nativo se tiver seções de objetos ou colunas de logs |
+| Colunas de `cards` em `export_objects` | O exemplo pede `cards` sem `id`, embora `id` seja obrigatório | Coluna ausente é aceita e relatada; a validação de obrigatório vale só para colunas presentes |
 | `secbox` | O exemplo não traz `device_id` nem `time` | Atribuído pelo IP de origem, com a hora vista pelo gateway |
 
 ## Riscos que já valem para todos os aparelhos

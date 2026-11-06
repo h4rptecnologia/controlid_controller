@@ -11,6 +11,9 @@ public sealed class CsvLimits
     public long MaxRows { get; init; } = 5_000_000;
 
     public TimeSpan MaxDuration { get; init; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>Teto de valores lembrados por campo ao procurar duplicados e referencias.</summary>
+    public int MaxTrackedValues { get; init; } = 1_000_000;
 }
 
 public sealed class CsvFormatException(string code) : Exception($"CSV invalido: {code}.")
