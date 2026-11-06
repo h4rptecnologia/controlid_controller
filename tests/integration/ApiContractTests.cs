@@ -180,6 +180,8 @@ public sealed class IdempotencyTests(PostgresFixture fixture) : IDisposable
             "/api/v1/gateways/",
             "/api/v1/gateways/{id:guid}/enrollment-token",
             "/api/v1/devices/{id:guid}/credential",
+            "/api/v1/people/{id:guid}/credentials",
+            "/api/v1/credentials/lookup",
         ];
         var routes = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
             .Where(e => e.RoutePattern.RawText?.StartsWith("/api/", StringComparison.Ordinal) == true)

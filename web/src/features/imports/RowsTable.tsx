@@ -39,11 +39,14 @@ function DecisionControls({ row, onDecide, busy }: { row: ImportRow; onDecide: (
     </button>
   )
 
+  // Credencial de outra pessoa so pode ficar de fora: tirar dela seria tomar o acesso em silencio.
+  const otherPerson = row.codes.includes('credential_of_other_person')
+
   return (
     <div className="row-actions">
       {row.kind === 'field_conflict' && (
         <>
-          {button('accept_source')}
+          {!otherPerson && button('accept_source')}
           {button('keep_platform')}
         </>
       )}
@@ -131,8 +134,11 @@ export function RowsTable({
                 <tr key={`${row.lineNo}-${row.sourceObject}`}>
                   <td data-label="Linha">{row.lineNo.toLocaleString('pt-BR')}</td>
                   <td data-label="Pessoa">
-                    {row.sample === null ? (
-                      <span className="muted">Registro de {row.sourceObject}</span>
+                    {row.sample === null || row.sample.name === '' ? (
+                      <span className="muted">
+                        Registro de {row.sourceObject}
+                        {row.sample !== null && row.sample.registration !== '' && `, final ${row.sample.registration}`}
+                      </span>
                     ) : (
                       <>
                         {row.sample.name}

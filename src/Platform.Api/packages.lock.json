@@ -102,6 +102,13 @@
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
       },
+      "platform.modules.accesspolicy": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Shared.Kernel": "[1.0.0, )",
+          "Platform.Shared.Storage": "[1.0.0, )"
+        }
+      },
       "platform.modules.fleet": {
         "type": "Project",
         "dependencies": {
@@ -130,6 +137,13 @@
           "Platform.Shared.Kernel": "[1.0.0, )",
           "Platform.Shared.Storage": "[1.0.0, )",
           "System.IO.Hashing": "[10.0.13, )"
+        }
+      },
+      "platform.modules.people": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Shared.Kernel": "[1.0.0, )",
+          "Platform.Shared.Storage": "[1.0.0, )"
         }
       },
       "platform.shared.contracts": {

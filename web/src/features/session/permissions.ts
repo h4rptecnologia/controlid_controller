@@ -7,6 +7,12 @@ export const Permission = {
   ImportCreate: 'import.create',
   ImportApprove: 'import.approve',
   DeviceRead: 'device.read',
+  PeopleRead: 'people.read',
+  PeopleWrite: 'people.write',
+  PeopleRevoke: 'people.revoke',
+  CredentialsManage: 'credentials.manage',
+  PoliciesRead: 'policies.read',
+  PoliciesWrite: 'policies.write',
 } as const
 
 function applies(grant: Grant, permission: string): boolean {

@@ -8,6 +8,8 @@ export function AppShell() {
   const me = useMe()
   const showSites = canAnywhere(me.grants, Permission.SitesRead) || canTenantWide(me.grants, Permission.SitesWrite)
   const showAudit = canTenantWide(me.grants, Permission.AuditRead)
+  const showPeople = canAnywhere(me.grants, Permission.PeopleRead)
+  const showAccess = canAnywhere(me.grants, Permission.PoliciesRead)
   const showImports = canAnywhere(me.grants, Permission.ImportCreate) || canAnywhere(me.grants, Permission.ImportApprove)
 
   async function leave() {
@@ -38,6 +40,16 @@ export function AppShell() {
           {showSites && (
             <li>
               <Link to="/unidades">Unidades</Link>
+            </li>
+          )}
+          {showPeople && (
+            <li>
+              <Link to="/pessoas">Pessoas</Link>
+            </li>
+          )}
+          {showAccess && (
+            <li>
+              <Link to="/acesso">Acesso</Link>
             </li>
           )}
           {showImports && (

@@ -15,8 +15,11 @@ builder.Services.AddHubStorage(builder.Configuration, builder.Environment);
 
 // A previa nao depende do antivirus: so processa arquivos que ja passaram pela inspecao.
 builder.Services.AddSingleton(builder.Configuration.GetSection("Preview").Get<PreviewLimits>() ?? new PreviewLimits());
-builder.Services.AddSingleton<ImportPreviewService>();
-builder.Services.AddHostedService<ImportPreviewWorker>();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Kms:Address"]))
+{
+    builder.Services.AddSingleton<ImportPreviewService>();
+    builder.Services.AddHostedService<ImportPreviewWorker>();
+}
 
 // Sem scanner nao ha inspecao: os arquivos esperam na quarentena, em vez de passar sem antivirus.
 var scannerHost = builder.Configuration["Scanner:Host"];

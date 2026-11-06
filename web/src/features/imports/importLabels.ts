@@ -40,6 +40,8 @@ const REASONS: Record<string, string> = {
   same_name_different_registration: 'Há uma pessoa com o mesmo nome e outra matrícula.',
   person_revoked: 'Esta pessoa está com o acesso revogado.',
   field_differs: 'Os dados diferem do cadastro.',
+  credential_of_other_person: 'Esta credencial já pertence a outra pessoa.',
+  invalid_credential: 'O valor da credencial é inválido.',
   missing_name: 'Falta o nome.',
   missing_registration: 'Falta a matrícula.',
   invalid_date: 'Data fora do formato escolhido.',

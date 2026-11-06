@@ -82,6 +82,23 @@ public sealed class PreviewClassifierTests
     }
 
     [Fact]
+    public void External_key_matches_and_disagreeing_with_the_registration_is_a_tie()
+    {
+        var byKey = new ExistingPerson(Guid.NewGuid(), true, "Ana Souza", "OUTRA", "employee", null, null, "active", null, "10");
+
+        Assert.Equal(byKey.Id, One(Candidate(registration: "OUTRA"), [byKey]).MatchPersonId);
+        Assert.Equal(PreviewKinds.PossibleDuplicate, One(Candidate(), [byKey, Person()]).Kind);
+    }
+
+    [Fact]
+    public void External_key_of_another_site_is_not_followed()
+    {
+        var other = new ExistingPerson(Guid.NewGuid(), false, "Outra", "X", "employee", null, null, "active", null, "10");
+
+        Assert.Equal(PreviewKinds.New, One(Candidate(), [other]).Kind);
+    }
+
+    [Fact]
     public void Name_alone_never_matches_automatically()
     {
         var existing = Person(registration: "DIFERENTE");

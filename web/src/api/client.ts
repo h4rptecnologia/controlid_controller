@@ -62,7 +62,38 @@ export async function apiPost<T>(path: string, body: unknown, idempotencyKey: st
     throw await toError(response)
   }
 
+  // 204 nao tem corpo: quem chama nao usa o retorno.
+  return (response.status === 204 ? undefined : await response.json()) as T
+}
+
+/** Edicao otimista: a versao que estava na tela vai no If-Match, e o servidor recusa se outra pessoa alterou antes. */
+export async function apiPatch<T>(path: string, body: unknown, version: number, idempotencyKey: string): Promise<T> {
+  const response = await send(path, {
+    method: 'PATCH',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Hub-Csrf': '1',
+      'Idempotency-Key': idempotencyKey,
+      'If-Match': `"${version}"`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    throw await toError(response)
+  }
+
   return (await response.json()) as T
+}
+
+export async function apiDelete(path: string, idempotencyKey: string): Promise<void> {
+  const response = await send(path, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', 'X-Hub-Csrf': '1', 'Idempotency-Key': idempotencyKey },
+  })
+  if (!response.ok) {
+    throw await toError(response)
+  }
 }
 
 /** Envia o arquivo como veio, sem chave de idempotencia: quem protege e a transicao de estado no servidor. */

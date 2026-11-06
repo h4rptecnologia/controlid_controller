@@ -6,7 +6,9 @@ using Platform.Api.Hosting;
 using Platform.Modules.Fleet;
 using Platform.Modules.Governance;
 using Platform.Modules.IdentityTenancy;
+using Platform.Modules.AccessPolicy;
 using Platform.Modules.Importation;
+using Platform.Modules.People;
 using Platform.Shared.Kernel.Authorization;
 using Platform.Shared.Kernel.Data;
 using Platform.Shared.Kernel.Http;
@@ -85,6 +87,8 @@ app.MapEventQueryEndpoints();
 app.MapBackfillEndpoints();
 app.MapImportEndpoints();
 app.MapImportRunEndpoints();
+app.MapPeopleEndpoints();
+app.MapAccessEndpoints();
 app.MapEdgeEndpoints();
 
 if (app.Environment.IsDevelopment())

@@ -12,8 +12,8 @@ export type AuditPage = Schemas['AuditPageResponse']
 export type Device = Schemas['DeviceResponse']
 
 /**
- * O gerador descreve inteiro de 64 bits como numero ou texto. Estas respostas trazem so contagens e numeros de linha, em
- * JSON numerico. Identificador e valor de cartao continuam texto: nunca passam por aqui.
+ * O gerador descreve inteiro de 64 bits como numero ou texto. Estas respostas trazem so contagens, versoes e numeros de
+ * linha, em JSON numerico. Identificador de equipamento e valor de cartao vem como texto na propria resposta.
  */
 type Counts<T> = number extends T
   ? string extends T
@@ -40,5 +40,16 @@ export type SourceAnalysis = {
   invalidImageEntries: number
   native: { parserId: string; objects: { name: string; rows: number; rowsWithErrors: number }[] } | null
 }
+
+export type Person = Counts<Schemas['PersonResponse']>
+export type PersonPage = Counts<Schemas['PersonPageResponse']>
+export type Credential = Schemas['CredentialResponse']
+export type DeviceLink = Counts<Schemas['DeviceLinkResponse']>
+export type SourceKey = Schemas['SourceKeyResponse']
+export type NamedItem = Schemas['NamedResponse']
+export type Portal = Schemas['PortalResponse']
+export type Schedule = Counts<Schemas['ScheduleResponse']>
+export type Holiday = Counts<Schemas['HolidayResponse']>
+export type Policy = Counts<Schemas['PolicyResponse']>
 
 export type AuthStatus = { loginConfigured: boolean }

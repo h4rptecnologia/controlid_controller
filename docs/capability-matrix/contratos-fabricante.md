@@ -44,6 +44,7 @@ O fabricante não documenta estes pontos. O conector adota a opção mais segura
 | Delimitador do CSV | `;`, `,` ou tabulação. A página de relatório cita `;` e `,`, mas para `report_generate` | Idem |
 | Objetos em `users.csv` | A página cita usuários, digitais e cartões. Exigimos `users` e recusamos logs; os demais são aceitos | Um arquivo sem seção `users` iria para mapeamento manual |
 | Unicidade de `cards`, `qrcodes` e `uhf_tags` por `value` | Valor repetido é erro de linha | Se o firmware permitir repetição, surgem erros falsos, visíveis na prévia |
+| QR e UHF | Comparados como texto exato, sem normalizar maiúsculas | O mesmo código com outra grafia contaria como outra credencial |
 | Diferença entre V5 e V6 | Desconhecida; `firmware_line` fica `undetermined` | Se os layouts divergirem, um perfil único não serve e será separado |
 | Valores de `type` em `access_events` | `TURN_LEFT`, `TURN_RIGHT`, `GIVE_UP`, `OPEN`, `CLOSE`, como na lista oficial | Outro valor fica `unknown` |
 

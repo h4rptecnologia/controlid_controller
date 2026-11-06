@@ -9,6 +9,8 @@ public enum KeyPurpose
     General,
     Biometric,
     Secret,
+    Credential,
+    Index,
 }
 
 public sealed class KeyServiceException : Exception
@@ -39,6 +41,12 @@ public interface IKeyService
     Task<string> RewrapAsync(string keyName, string wrappedDek, CancellationToken cancellationToken);
 
     Task RotateAsync(string keyName, CancellationToken cancellationToken);
+
+    /// <summary>Cria a chave se faltar. Sem efeito se ja existir.</summary>
+    Task EnsureKeyAsync(string keyName, CancellationToken cancellationToken);
+
+    /// <summary>HMAC-SHA256 calculado no KMS, sempre com a versao 1 da chave: o indice precisa dar o mesmo resultado depois de rotacoes.</summary>
+    Task<IReadOnlyList<byte[]>> HmacAsync(string keyName, IReadOnlyList<byte[]> inputs, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -71,6 +79,35 @@ public sealed class TransitKeyService(HttpClient client, string mount = "transit
         EnsureSuccess(response);
     }
 
+    public async Task EnsureKeyAsync(string keyName, CancellationToken cancellationToken)
+    {
+        using var response = await client.PostAsJsonAsync(new Uri($"v1/{mount}/keys/{Name(keyName)}", UriKind.Relative), new { type = "aes256-gcm96" }, cancellationToken);
+        EnsureSuccess(response);
+    }
+
+    public async Task<IReadOnlyList<byte[]>> HmacAsync(string keyName, IReadOnlyList<byte[]> inputs, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        var body = new { key_version = 1, batch_input = inputs.Select(input => new { input = Convert.ToBase64String(input) }).ToList() };
+        using var response = await client.PostAsJsonAsync(new Uri($"v1/{mount}/hmac/{Name(keyName)}/sha2-256", UriKind.Relative), body, cancellationToken);
+        EnsureSuccess(response);
+        var envelope = await response.Content.ReadFromJsonAsync<HmacEnvelope>(cancellationToken);
+        var results = envelope?.Data?.Results;
+        if (results is null || results.Count != inputs.Count)
+        {
+            throw new KeyServiceException();
+        }
+
+        return results.Select(result => FromHmac(result.Hmac)).ToList();
+    }
+
+    // Formato "vault:v1:base64". O prefixo nao entra no indice: so a versao 1 e usada.
+    private static byte[] FromHmac(string? value)
+    {
+        const string Prefix = "vault:v1:";
+        return value is not null && value.StartsWith(Prefix, StringComparison.Ordinal) ? Convert.FromBase64String(value[Prefix.Length..]) : throw new KeyServiceException();
+    }
+
     private async Task<TransitData> PostAsync(string keyName, string operation, object body, CancellationToken cancellationToken)
     {
         using var response = await client.PostAsJsonAsync(new Uri($"v1/{mount}/{operation}/{Name(keyName)}", UriKind.Relative), body, cancellationToken);
@@ -89,6 +126,12 @@ public sealed class TransitKeyService(HttpClient client, string mount = "transit
     }
 
     private static string Name(string keyName) => Uri.EscapeDataString(keyName);
+
+    private sealed record HmacEnvelope([property: JsonPropertyName("data")] HmacData? Data);
+
+    private sealed record HmacData([property: JsonPropertyName("batch_results")] IReadOnlyList<HmacResult>? Results);
+
+    private sealed record HmacResult([property: JsonPropertyName("hmac")] string? Hmac);
 
     private sealed record TransitEnvelope([property: JsonPropertyName("data")] TransitData? Data);
 

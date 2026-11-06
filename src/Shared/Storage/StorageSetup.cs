@@ -35,6 +35,8 @@ public static class StorageSetup
             client.DefaultRequestHeaders.Add("X-Vault-Token", Required(kms, "Token"));
         });
 
+        services.AddTransient<CredentialProtector>();
+
         services.AddSingleton(_ => S3ObjectStore.CreateClient(storageUrl.ToString(), Required(storage, "AccessKey"), Required(storage, "SecretKey")));
         services.AddSingleton(provider => new S3ObjectStore(provider.GetRequiredService<Amazon.S3.IAmazonS3>(), bucket));
         services.AddSingleton<IObjectStore>(provider => provider.GetRequiredService<S3ObjectStore>());

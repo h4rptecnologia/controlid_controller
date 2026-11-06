@@ -3,7 +3,7 @@ import type { ImportFile, ImportPlan, ImportRun } from '../../api/types'
 import { currentStep, fileSizeLabel, planStatement, problemLabel, reasonLabel, rejectionLabel, runStatus } from './importLabels'
 import { rowsPath } from './importsApi'
 
-const PLAN: ImportPlan = { add: 0, update: 0, unchanged: 0, skipped: 0, invalid: 0, pendingReferences: 0, biometrics: 0, credentialsNotCompared: 0, newEvents: 0, eventsNotCompared: 0 }
+const PLAN: ImportPlan = { add: 0, update: 0, unchanged: 0, skipped: 0, invalid: 0, pendingReferences: 0, biometrics: 0, newCredentials: 0, credentialsNotCompared: 0, newEvents: 0, eventsNotCompared: 0 }
 
 function file(partial: Partial<ImportFile>): ImportFile {
   return { status: 'inspected', parserStatus: 'parsed_by_documentation', ...partial } as ImportFile

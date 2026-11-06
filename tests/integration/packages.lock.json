@@ -582,10 +582,12 @@
           "Microsoft.AspNetCore.Authentication.OpenIdConnect": "[10.0.13, )",
           "Microsoft.AspNetCore.OpenApi": "[10.0.13, )",
           "Npgsql": "[10.0.3, )",
+          "Platform.Modules.AccessPolicy": "[1.0.0, )",
           "Platform.Modules.Fleet": "[1.0.0, )",
           "Platform.Modules.Governance": "[1.0.0, )",
           "Platform.Modules.IdentityTenancy": "[1.0.0, )",
           "Platform.Modules.Importation": "[1.0.0, )",
+          "Platform.Modules.People": "[1.0.0, )",
           "Platform.Shared.Kernel": "[1.0.0, )",
           "Platform.Shared.Storage": "[1.0.0, )"
         }
@@ -613,6 +615,13 @@
           "Npgsql": "[10.0.3, )",
           "Platform.Shared.Kernel": "[1.0.0, )",
           "dbup-postgresql": "[7.0.1, )"
+        }
+      },
+      "platform.modules.accesspolicy": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Shared.Kernel": "[1.0.0, )",
+          "Platform.Shared.Storage": "[1.0.0, )"
         }
       },
       "platform.modules.deviceintegration.controlid": {
@@ -646,6 +655,13 @@
           "Platform.Shared.Kernel": "[1.0.0, )",
           "Platform.Shared.Storage": "[1.0.0, )",
           "System.IO.Hashing": "[10.0.13, )"
+        }
+      },
+      "platform.modules.people": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Shared.Kernel": "[1.0.0, )",
+          "Platform.Shared.Storage": "[1.0.0, )"
         }
       },
       "platform.shared.contracts": {

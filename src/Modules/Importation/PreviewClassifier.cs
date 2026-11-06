@@ -27,6 +27,8 @@ public static class PreviewCodes
     public const string InvalidDate = "invalid_date";
     public const string InvalidPersonType = "invalid_person_type";
     public const string UnknownUserType = "unknown_user_type";
+    public const string CredentialOfOtherPerson = "credential_of_other_person";
+    public const string InvalidCredential = "invalid_credential";
 }
 
 public static class PersonFields
@@ -108,7 +110,8 @@ public sealed record ExistingPerson(
     DateTimeOffset? ValidFrom,
     DateTimeOffset? ValidTo,
     string State,
-    string? LinkedSourceId);
+    string? LinkedSourceId,
+    string? ExternalKey = null);
 
 public sealed record PreviewChange(string Field, string From, string To, string Policy);
 
@@ -129,7 +132,8 @@ public sealed record PreviewRow(
     PreviewSample Sample);
 
 /// <summary>
-/// Conciliacao, na ordem de confianca do documento de importacao: vinculo com o equipamento, depois matricula na unidade.
+/// Conciliacao, na ordem de confianca do documento de importacao: vinculo com o equipamento, chave imutavel do sistema de
+/// origem, depois matricula na unidade. Se apontarem para pessoas diferentes, e empate.
 /// Nome nunca e chave automatica: no maximo levanta suspeita. Empate exige decisao humana. Sem acesso a banco, para ser
 /// testado sozinho.
 /// </summary>
@@ -146,6 +150,7 @@ public static class PreviewClassifier
 
         var active = existing.Where(p => p.State != "deleted").ToList();
         var byLink = active.Where(p => p.LinkedSourceId is not null).ToLookup(p => p.LinkedSourceId!, StringComparer.Ordinal);
+        var byExternal = active.Where(p => p.ExternalKey is not null).ToLookup(p => p.ExternalKey!, StringComparer.Ordinal);
         var byRegistration = active.Where(p => p.Registration is not null).ToLookup(p => p.Registration!, StringComparer.Ordinal);
         var byName = active.Where(p => p.SameSite).ToLookup(p => NormalizeName(p.DisplayName), StringComparer.Ordinal);
 
@@ -155,7 +160,7 @@ public static class PreviewClassifier
 
         foreach (var candidate in candidates)
         {
-            rows.Add(ClassifyOne(candidate, byLink, byRegistration, byName, seenFingerprints, seenRegistrations, fieldPolicy));
+            rows.Add(ClassifyOne(candidate, byLink, byExternal, byRegistration, byName, seenFingerprints, seenRegistrations, fieldPolicy));
         }
 
         return rows;
@@ -164,6 +169,7 @@ public static class PreviewClassifier
     private static PreviewRow ClassifyOne(
         PersonCandidate candidate,
         ILookup<string, ExistingPerson> byLink,
+        ILookup<string, ExistingPerson> byExternal,
         ILookup<string, ExistingPerson> byRegistration,
         ILookup<string, ExistingPerson> byName,
         HashSet<string> seenFingerprints,
@@ -200,8 +206,9 @@ public static class PreviewClassifier
         }
 
         var linked = candidate.SourceId is null ? [] : byLink[candidate.SourceId].Where(p => p.SameSite).ToList();
+        var external = candidate.SourceId is null ? [] : byExternal[candidate.SourceId].Where(p => p.SameSite).ToList();
         var sameRegistration = byRegistration[registration].ToList();
-        var matches = linked.Concat(sameRegistration.Where(p => p.SameSite)).DistinctBy(p => p.Id).ToList();
+        var matches = linked.Concat(external).Concat(sameRegistration.Where(p => p.SameSite)).DistinctBy(p => p.Id).ToList();
 
         if (matches.Count > 1)
         {

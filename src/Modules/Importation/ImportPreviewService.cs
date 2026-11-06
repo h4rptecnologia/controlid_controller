@@ -31,9 +31,12 @@ public static class RunErrors
 
 public sealed record PreviewEventCounts(long Total, long AlreadyImported, long New, long NotCompared);
 
-/// <summary>Totais da previa, sem nenhum valor do arquivo. Credencial e so contada ate existir o modelo do E03.4.</summary>
+public sealed record PreviewCredentialCounts(long New, long SamePerson, long OtherPerson);
+
+/// <summary>Totais da previa, sem nenhum valor do arquivo. PIN nao tem indice de busca: fica sem comparacao, e a tela diz isso.</summary>
 public sealed record PreviewStats(
     IReadOnlyDictionary<string, long> People,
+    IReadOnlyDictionary<string, PreviewCredentialCounts> Credentials,
     IReadOnlyDictionary<string, long> CredentialsNotCompared,
     long BiometricsExcluded,
     PreviewEventCounts Events,
@@ -53,6 +56,7 @@ public sealed class ImportPreviewService(
     NpgsqlDataSource dataSource,
     ITenantDatabase database,
     EncryptedBlobStore store,
+    CredentialProtector protector,
     PreviewLimits limits,
     ILogger<ImportPreviewService> logger)
 {
@@ -62,7 +66,13 @@ public sealed class ImportPreviewService(
     private const string EventFamily = "access_logs";
     private static readonly TimeSpan Stale = TimeSpan.FromMinutes(15);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static readonly HashSet<string> Credentials = new(StringComparer.Ordinal) { "cards", "qrcodes", "uhf_tags", "pins" };
+    private static readonly Dictionary<string, string> Credentials = new(StringComparer.Ordinal)
+    {
+        ["cards"] = CredentialKinds.Card,
+        ["qrcodes"] = CredentialKinds.Qr,
+        ["uhf_tags"] = CredentialKinds.Uhf,
+        ["pins"] = CredentialKinds.Pin,
+    };
     private static readonly HashSet<string> Biometrics = new(StringComparer.Ordinal) { "templates" };
 
     public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken)
@@ -117,7 +127,7 @@ public sealed class ImportPreviewService(
             tx => tx.QuerySingleOrDefaultAsync<JobRow>(
                 """
                 SELECT f.encrypted_blob_ref AS BlobRef, f.content_size_bytes AS Size, f.detected_type AS DetectedType, f.site_id AS SiteId, f.source_format AS SourceFormat,
-                       r.device_id AS DeviceId, r.mapping::text AS MappingText, r.field_policy::text AS PolicyText
+                       r.device_id AS DeviceId, r.mapping::text AS MappingText, r.field_policy::text AS PolicyText, r.source_system AS SourceSystem
                 FROM hub.import_runs r JOIN hub.import_files f ON f.tenant_id = r.tenant_id AND f.id = r.file_id
                 WHERE r.id = @RunId
                 """,
@@ -150,10 +160,18 @@ public sealed class ImportPreviewService(
         var existing = await LoadExistingAsync(claimed.TenantId, job, collected.People, cancellationToken);
         var rows = PreviewClassifier.Classify(collected.People, existing, policy);
         var events = await CountEventsAsync(claimed.TenantId, job.DeviceId, collected.EventIds, cancellationToken);
+        var (credentialCounts, credentialConflicts) = await CompareCredentialsAsync(claimed.TenantId, collected, rows, cancellationToken);
+
+        var people = rows.GroupBy(r => r.Kind).ToDictionary(g => g.Key, g => (long)g.Count(), StringComparer.Ordinal);
+        if (credentialConflicts.Count > 0)
+        {
+            people[PreviewKinds.FieldConflict] = people.GetValueOrDefault(PreviewKinds.FieldConflict) + credentialConflicts.Count;
+        }
 
         var stats = new PreviewStats(
-            rows.GroupBy(r => r.Kind).ToDictionary(g => g.Key, g => (long)g.Count(), StringComparer.Ordinal),
-            collected.Credentials,
+            people,
+            credentialCounts,
+            collected.CredentialsNotCompared,
             collected.Biometrics,
             events,
             collected.Others,
@@ -164,7 +182,7 @@ public sealed class ImportPreviewService(
             collected.Summary?.UnknownSections ?? 0,
             collected.Summary?.ParserId);
 
-        await PersistAsync(claimed, rows, collected.InvalidOther, stats, cancellationToken);
+        await PersistAsync(claimed, rows, credentialConflicts, collected.InvalidOther, stats, cancellationToken);
     }
 
     private async Task<Collected> ReadNativeAsync(ImportCsvSource csv, string? format, CancellationToken cancellationToken)
@@ -212,9 +230,9 @@ public sealed class ImportPreviewService(
             return;
         }
 
-        if (Credentials.Contains(record.ObjectName))
+        if (Credentials.TryGetValue(record.ObjectName, out var kind))
         {
-            collected.Credentials[record.ObjectName] = collected.Credentials.GetValueOrDefault(record.ObjectName) + 1;
+            CollectCredential(collected, record, kind);
         }
         else if (Biometrics.Contains(record.ObjectName))
         {
@@ -245,6 +263,87 @@ public sealed class ImportPreviewService(
                 collected.InvalidNotStored++;
             }
         }
+    }
+
+    private void CollectCredential(Collected collected, NativeRecord record, string kind)
+    {
+        // PIN nao e comparado: nao tem indice de busca, e o valor nem fica em memoria alem desta linha.
+        if (!CredentialKinds.IsSearchable(kind))
+        {
+            collected.CredentialsNotCompared[record.ObjectName] = collected.CredentialsNotCompared.GetValueOrDefault(record.ObjectName) + 1;
+            return;
+        }
+
+        if (record.Errors.Count > 0 || !record.Fields.TryGetValue("value", out var value))
+        {
+            return;
+        }
+
+        if (!CredentialValue.TryNormalize(kind, value, out var normalized))
+        {
+            collected.CredentialsInvalid.Add(new InvalidRow(record.RowNumber, record.ObjectName, null, [PreviewCodes.InvalidCredential]));
+            return;
+        }
+
+        if (collected.CredentialValues.Count >= limits.MaxPeople)
+        {
+            throw new PreviewFailure(RunErrors.TooManyPeople);
+        }
+
+        collected.CredentialValues.Add(new CredentialCandidate(record.RowNumber, record.ObjectName, kind, record.Fields.GetValueOrDefault("user_id"), normalized));
+    }
+
+    /// <summary>
+    /// Compara pelo indice cego, sem decifrar nada. Cartao que ja e de outra pessoa nunca passa sem decisao, e so pode ficar
+    /// de fora: tirar credencial de alguem por importacao seria tomar o acesso dessa pessoa em silencio.
+    /// </summary>
+    private async Task<(Dictionary<string, PreviewCredentialCounts> Counts, List<StoredRow> Conflicts)> CompareCredentialsAsync(Guid tenant, Collected collected, IReadOnlyList<PreviewRow> rows, CancellationToken cancellationToken)
+    {
+        var counts = new Dictionary<string, PreviewCredentialCounts>(StringComparer.Ordinal);
+        var conflicts = new List<StoredRow>();
+        var matchedBySource = rows.Where(r => r.SourceKey is not null && r.MatchPersonId is not null)
+            .GroupBy(r => r.SourceKey!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().MatchPersonId!.Value, StringComparer.Ordinal);
+
+        foreach (var group in collected.CredentialValues.GroupBy(c => c.ObjectName, StringComparer.Ordinal))
+        {
+            var items = group.ToList();
+            var kind = items[0].Kind;
+            var indexes = await protector.IndexManyAsync(tenant, kind, items.Select(i => i.Value).ToList(), cancellationToken);
+            var hex = indexes.Select(Convert.ToHexStringLower).ToArray();
+            var owners = (await database.InTenantAsync(
+                tenant,
+                tx => tx.QueryAsync<CredentialOwner>(
+                    """
+                    SELECT encode(blind_index, 'hex') AS IndexHex, person_id AS PersonId FROM hub.credentials
+                    WHERE kind = @kind AND revoked_at IS NULL AND blind_index = ANY(SELECT decode(v, 'hex') FROM unnest(@hex::text[]) AS v)
+                    """,
+                    new { kind, hex }),
+                cancellationToken)).ToDictionary(o => o.IndexHex, o => o.PersonId, StringComparer.Ordinal);
+
+            long added = 0, same = 0, other = 0;
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (!owners.TryGetValue(hex[i], out var owner))
+                {
+                    added++;
+                }
+                else if (items[i].UserSourceId is { } user && matchedBySource.TryGetValue(user, out var match) && match == owner)
+                {
+                    same++;
+                }
+                else
+                {
+                    other++;
+                    var sample = new PreviewSample(string.Empty, CredentialValue.Hint(kind, items[i].Value), [], []);
+                    conflicts.Add(new StoredRow(items[i].Row, items[i].ObjectName, null, PreviewKinds.FieldConflict, null, [PreviewCodes.CredentialOfOtherPerson], JsonSerializer.Serialize(sample, Json)));
+                }
+            }
+
+            counts[group.Key] = new PreviewCredentialCounts(added, same, other);
+        }
+
+        return (counts, conflicts);
     }
 
     private async Task<Collected> ReadMappedAsync(ImportCsvSource csv, TabularMapping mapping, CancellationToken cancellationToken)
@@ -301,6 +400,7 @@ public sealed class ImportPreviewService(
             .Select(p => string.Join(' ', p.DisplayName!.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToLowerInvariant())
             .Distinct(StringComparer.Ordinal).ToArray();
         var sources = job.DeviceId is null ? [] : people.Where(p => PreviewClassifier.IsSafeKey(p.SourceId)).Select(p => p.SourceId!).Distinct(StringComparer.Ordinal).ToArray();
+        var externals = job.SourceSystem is null ? [] : people.Where(p => !string.IsNullOrEmpty(p.SourceId)).Select(p => p.SourceId!).Distinct(StringComparer.Ordinal).ToArray();
 
         return database.InTenantAsync<IReadOnlyCollection<ExistingPerson>>(
             tenant,
@@ -309,16 +409,18 @@ public sealed class ImportPreviewService(
                 var rows = await tx.QueryAsync<PersonRow>(
                     """
                     SELECT p.id AS Id, (p.site_id IS NULL OR p.site_id = @site) AS SameSite, p.display_name AS DisplayName, p.registration AS Registration,
-                           p.person_type AS PersonType, p.valid_from AS ValidFrom, p.valid_to AS ValidTo, p.state AS State, l.source_user_id::text AS LinkedSourceId
+                           p.person_type AS PersonType, p.valid_from AS ValidFrom, p.valid_to AS ValidTo, p.state AS State, l.source_user_id::text AS LinkedSourceId, k.external_key AS ExternalKey
                     FROM hub.people p
                     LEFT JOIN hub.person_device_links l ON l.tenant_id = p.tenant_id AND l.person_id = p.id AND l.device_id = @device
+                    LEFT JOIN hub.entity_source_keys k ON k.tenant_id = p.tenant_id AND k.entity_type = 'person' AND k.entity_id = p.id AND k.source_system = @system
                     WHERE p.deleted_at IS NULL
                       AND (p.registration = ANY(@registrations)
                         OR lower(regexp_replace(trim(p.display_name), '\s+', ' ', 'g')) = ANY(@names)
-                        OR l.source_user_id::text = ANY(@sources))
+                        OR l.source_user_id::text = ANY(@sources)
+                        OR k.external_key = ANY(@externals))
                     """,
-                    new { site = job.SiteId, device = job.DeviceId, registrations, names, sources });
-                return rows.Select(r => new ExistingPerson(r.Id, r.SameSite, r.DisplayName, r.Registration, r.PersonType, ToOffset(r.ValidFrom), ToOffset(r.ValidTo), r.State, r.LinkedSourceId)).ToList();
+                    new { site = job.SiteId, device = job.DeviceId, system = job.SourceSystem, registrations, names, sources, externals });
+                return rows.Select(r => new ExistingPerson(r.Id, r.SameSite, r.DisplayName, r.Registration, r.PersonType, ToOffset(r.ValidFrom), ToOffset(r.ValidTo), r.State, r.LinkedSourceId, r.ExternalKey)).ToList();
             },
             cancellationToken);
     }
@@ -349,11 +451,12 @@ public sealed class ImportPreviewService(
         return new PreviewEventCounts(ids.Count, already, ids.Count - already, 0);
     }
 
-    private async Task PersistAsync(ClaimedRun claimed, IReadOnlyList<PreviewRow> rows, List<InvalidRow> invalid, PreviewStats stats, CancellationToken cancellationToken)
+    private async Task PersistAsync(ClaimedRun claimed, IReadOnlyList<PreviewRow> rows, List<StoredRow> credentialConflicts, List<InvalidRow> invalid, PreviewStats stats, CancellationToken cancellationToken)
     {
         // Chave descartada ao fim: dado de pouca entropia, como matricula, nao pode ser recuperado do digest por tentativa.
         var digestKey = RandomNumberGenerator.GetBytes(32);
         var payload = rows.Select(r => new StoredRow(r.Row, "users", r.SourceKey, r.Kind, r.MatchPersonId, r.Codes, JsonSerializer.Serialize(r.Sample, Json)))
+            .Concat(credentialConflicts)
             .Concat(invalid.Select(r => new StoredRow(r.Row, r.ObjectName, r.Key, PreviewKinds.Invalid, null, r.Codes, "{}")))
             .ToList();
 
@@ -429,7 +532,11 @@ public sealed class ImportPreviewService(
     {
         public List<PersonCandidate> People { get; } = [];
 
-        public Dictionary<string, long> Credentials { get; } = new(StringComparer.Ordinal);
+        public List<CredentialCandidate> CredentialValues { get; } = [];
+
+        public Dictionary<string, long> CredentialsNotCompared { get; } = new(StringComparer.Ordinal);
+
+        public List<InvalidRow> CredentialsInvalid => InvalidOther;
 
         public Dictionary<string, long> Others { get; } = new(StringComparer.Ordinal);
 
@@ -444,15 +551,19 @@ public sealed class ImportPreviewService(
         public NativeParseSummary? Summary { get; set; }
     }
 
+    private sealed record CredentialCandidate(long Row, string ObjectName, string Kind, string? UserSourceId, string Value);
+
+    private sealed record CredentialOwner(string IndexHex, Guid PersonId);
+
     private sealed record InvalidRow(long Row, string ObjectName, string? Key, IReadOnlyList<string> Codes);
 
     private sealed record StoredRow(long Row, string ObjectName, string? Key, string Kind, Guid? Person, IReadOnlyList<string> Codes, string SampleJson);
 
     private sealed record ClaimedRun(Guid TenantId, Guid RunId, Guid FileId, int Attempts);
 
-    private sealed record JobRow(string? BlobRef, long? Size, string? DetectedType, Guid? SiteId, string? SourceFormat, Guid? DeviceId, string? MappingText, string? PolicyText);
+    private sealed record JobRow(string? BlobRef, long? Size, string? DetectedType, Guid? SiteId, string? SourceFormat, Guid? DeviceId, string? MappingText, string? PolicyText, string? SourceSystem);
 
-    private sealed record PersonRow(Guid Id, bool SameSite, string DisplayName, string? Registration, string PersonType, DateTime? ValidFrom, DateTime? ValidTo, string State, string? LinkedSourceId);
+    private sealed record PersonRow(Guid Id, bool SameSite, string DisplayName, string? Registration, string PersonType, DateTime? ValidFrom, DateTime? ValidTo, string State, string? LinkedSourceId, string? ExternalKey);
 
     private sealed class PreviewFailure : Exception
     {

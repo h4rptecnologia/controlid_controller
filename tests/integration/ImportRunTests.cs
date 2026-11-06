@@ -45,7 +45,7 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
         {
         }
 
-        var previews = new ImportPreviewService(workerSource, new TenantDatabase(workerSource), Store(), limits ?? new PreviewLimits(), NullLogger<ImportPreviewService>.Instance);
+        var previews = new ImportPreviewService(workerSource, new TenantDatabase(workerSource), Store(), new CredentialProtector(new TransitKeyService(kms)), limits ?? new PreviewLimits(), NullLogger<ImportPreviewService>.Instance);
         for (var i = 0; i < 25 && await previews.ProcessNextAsync(None); i++)
         {
         }
@@ -150,6 +150,8 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
 
     private static async Task<string?> CodeAsync(HttpResponseMessage response) =>
         (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString();
+
+    private static long[] LineOf(long line) => [line];
 
     private static readonly long[] Line1 = [1];
     private static readonly long[] Line3 = [3];
@@ -281,7 +283,7 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
     {
         var team = await TeamAsync();
         var first = await PersonAsync(team.Tenant, "Ana A", "MAT001", team.Site);
-        await PersonAsync(team.Tenant, "Ana B", "MAT001", team.Site);
+        await PersonAsync(team.Tenant, "Ana B", "MAT001", null);
         var stranger = await PersonAsync(team.Tenant, "Fora Da Lista", "ZZZ", team.Site);
         var run = await PreviewAsync(team, "users\nid;registration;name\n1;MAT001;Ana Souza\n");
 
@@ -692,7 +694,7 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
         hooked.Inner = s3;
         hooked.BeforeFirstRead = async () => Assert.Equal(HttpStatusCode.OK, (await team.Operator.PostAsJsonAsync(Url($"/api/v1/import-runs/{run}/cancel"), new { })).StatusCode);
         var store = new EncryptedBlobStore(new S3ObjectStore(proxy, StorageFixture.Bucket), new TransitKeyService(kms), new TenantDatabase(workerSource));
-        var previews = new ImportPreviewService(workerSource, new TenantDatabase(workerSource), store, new PreviewLimits(), NullLogger<ImportPreviewService>.Instance);
+        var previews = new ImportPreviewService(workerSource, new TenantDatabase(workerSource), store, new CredentialProtector(new TransitKeyService(kms)), new PreviewLimits(), NullLogger<ImportPreviewService>.Instance);
 
         Assert.True(await previews.ProcessNextAsync(None));
 
@@ -790,7 +792,7 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
         var body = await RunAsync(team.Operator, run);
         var stats = body.GetProperty("stats");
         Assert.Equal(1, stats.GetProperty("biometricsExcluded").GetInt64());
-        Assert.Equal(1, stats.GetProperty("credentialsNotCompared").GetProperty("cards").GetInt64());
+        Assert.Equal(1, stats.GetProperty("credentials").GetProperty("cards").GetProperty("new").GetInt64());
         Assert.Equal(1, stats.GetProperty("credentialsNotCompared").GetProperty("pins").GetInt64());
 
         await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
@@ -945,6 +947,144 @@ public sealed class ImportRunTests(PostgresFixture postgres, StorageFixture stor
         Assert.Contains("3;users;invalid_integer", csv, StringComparison.Ordinal);
         Assert.DoesNotContain("MARCADOR", csv, StringComparison.Ordinal);
         Assert.DoesNotContain("HYPERLINK", csv, StringComparison.Ordinal);
+    }
+
+    // Credenciais comparadas com o cadastro
+
+    private async Task CredentialAsync(Guid tenant, Guid person, string kind, string value)
+    {
+        var index = await new CredentialProtector(new TransitKeyService(kms)).IndexAsync(tenant, kind, value, None);
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("INSERT INTO hub.credentials (tenant_id, person_id, kind, ciphertext, blind_index) VALUES (@t, @p, @k, '\\x00', @i)", connection);
+        command.Parameters.AddWithValue("t", tenant);
+        command.Parameters.AddWithValue("p", person);
+        command.Parameters.AddWithValue("k", kind);
+        command.Parameters.AddWithValue("i", index);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    [Fact]
+    public async Task Card_already_of_the_same_person_is_recognized_and_new_card_is_counted()
+    {
+        var team = await TeamAsync();
+        var person = await PersonAsync(team.Tenant, "Ana Souza", "MAT001", team.Site);
+        await CredentialAsync(team.Tenant, person, "card", "42");
+
+        var run = await PreviewAsync(team, "users\nid;registration;name\n1;MAT001;Ana Souza\ncards\nid;value;user_id\n5;042;1\n6;43;1\n");
+
+        var body = await RunAsync(team.Operator, run);
+        var cards = body.GetProperty("stats").GetProperty("credentials").GetProperty("cards");
+        Assert.Equal(1, cards.GetProperty("samePerson").GetInt64());
+        Assert.Equal(1, cards.GetProperty("new").GetInt64());
+        Assert.Equal(0, cards.GetProperty("otherPerson").GetInt64());
+        Assert.Equal(0, body.GetProperty("unresolvedDecisions").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("MAT002")]
+    [InlineData("NOVA")]
+    public async Task Card_of_another_person_needs_a_decision_and_cannot_be_taken_from_them(string registration)
+    {
+        var team = await TeamAsync();
+        var owner = await PersonAsync(team.Tenant, "Dona Do Cartao", "MAT001", team.Site);
+        await CredentialAsync(team.Tenant, owner, "card", "42");
+        await PersonAsync(team.Tenant, "Outra Pessoa", "MAT002", team.Site);
+
+        var run = await PreviewAsync(team, $"users\nid;registration;name\n1;{registration};Outra Pessoa\ncards\nid;value;user_id\n5;42;1\n");
+
+        var conflict = (await RowsAsync(team.Operator, run, PreviewKinds.FieldConflict)).Single(r => r.GetProperty("sourceObject").GetString() == "cards");
+        Assert.Contains(PreviewCodes.CredentialOfOtherPerson, conflict.GetProperty("codes").EnumerateArray().Select(c => c.GetString()));
+        Assert.DoesNotContain(owner.ToString(), conflict.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Dona", conflict.GetRawText(), StringComparison.Ordinal);
+        Assert.True((await RunAsync(team.Operator, run)).GetProperty("unresolvedDecisions").GetInt64() >= 1);
+
+        var line = conflict.GetProperty("lineNo").GetInt64();
+        var refused = await DecideAsync(team.Operator, run, new { lines = LineOf(line), decision = ImportDecisions.AcceptSource });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await DecideAsync(team.Operator, run, new { lines = LineOf(line), decision = ImportDecisions.Skip })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Bulk_accept_does_not_take_a_card_from_another_person()
+    {
+        var team = await TeamAsync();
+        var owner = await PersonAsync(team.Tenant, "Dona Do Cartao", "MAT001", team.Site);
+        await CredentialAsync(team.Tenant, owner, "card", "42");
+
+        var run = await PreviewAsync(team, "users\nid;registration;name\n1;NOVA;Outra Pessoa\ncards\nid;value;user_id\n5;42;1\n");
+        await DecideAsync(team.Operator, run, new { kind = PreviewKinds.FieldConflict, decision = ImportDecisions.AcceptSource });
+
+        Assert.Equal(1, (await RunAsync(team.Operator, run)).GetProperty("unresolvedDecisions").GetInt64());
+    }
+
+    [Fact]
+    public async Task Revoked_card_is_new_again()
+    {
+        var team = await TeamAsync();
+        var owner = await PersonAsync(team.Tenant, "Ex Dona", "MAT001", team.Site);
+        await CredentialAsync(team.Tenant, owner, "card", "42");
+        await using (var connection = new NpgsqlConnection(postgres.AdminOnHubConnection))
+        {
+            await connection.OpenAsync();
+            await using var revoke = new NpgsqlCommand("UPDATE hub.credentials SET revoked_at = now() WHERE person_id = @p", connection);
+            revoke.Parameters.AddWithValue("p", owner);
+            await revoke.ExecuteNonQueryAsync();
+        }
+
+        var run = await PreviewAsync(team, "users\nid;registration;name\n1;NOVA;Outra Pessoa\ncards\nid;value;user_id\n5;42;1\n");
+
+        Assert.Equal(1, (await RunAsync(team.Operator, run)).GetProperty("stats").GetProperty("credentials").GetProperty("cards").GetProperty("new").GetInt64());
+    }
+
+    [Fact]
+    public async Task Pin_is_not_compared_and_stays_out_of_every_table()
+    {
+        var team = await TeamAsync();
+        var run = await PreviewAsync(team, "users\nid;registration;name\n1;MAT001;Ana Souza\npins\nid;value;user_id\n8;908172;1\n");
+
+        Assert.Equal(1, (await RunAsync(team.Operator, run)).GetProperty("stats").GetProperty("credentialsNotCompared").GetProperty("pins").GetInt64());
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT count(*) FROM hub.import_rows t WHERE t.tenant_id = @t AND t::text LIKE '%908172%'", connection);
+        command.Parameters.AddWithValue("t", team.Tenant);
+        Assert.Equal(0L, await command.ExecuteScalarAsync());
+    }
+
+    [Fact]
+    public async Task External_key_of_the_declared_system_is_a_match()
+    {
+        var team = await TeamAsync();
+        var person = await PersonAsync(team.Tenant, "Ana Souza", "MATRICULA-ANTIGA", team.Site);
+        await using (var connection = new NpgsqlConnection(postgres.AdminOnHubConnection))
+        {
+            await connection.OpenAsync();
+            await using var key = new NpgsqlCommand("INSERT INTO hub.entity_source_keys (tenant_id, entity_type, source_system, external_key, entity_id) VALUES (@t, 'person', 'rh', 'E-77', @p)", connection);
+            key.Parameters.AddWithValue("t", team.Tenant);
+            key.Parameters.AddWithValue("p", person);
+            await key.ExecuteNonQueryAsync();
+        }
+
+        var file = await SpreadsheetAsync(team, "chave;nome;matricula\nE-77;Ana Souza;MAT-NOVA\n");
+        var mapping = new
+        {
+            delimiter = ";",
+            hasHeader = true,
+            columns = new object[] { new { index = 0, target = "source_id" }, new { index = 1, target = PersonFields.DisplayName }, new { index = 2, target = PersonFields.Registration } },
+        };
+
+        var withSystem = (await (await StartAsync(team.Operator, file, new { mapping, sourceSystem = "rh" })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await DrainAsync();
+        var matched = (await RowsAsync(team.Operator, withSystem)).Single();
+        Assert.Equal(person, matched.GetProperty("matchPersonId").GetGuid());
+        await team.Operator.PostAsJsonAsync(Url($"/api/v1/import-runs/{withSystem}/cancel"), new { });
+
+        // Outro sistema nao e a mesma chave: so sobra a suspeita pelo nome.
+        var otherSystem = (await (await StartAsync(team.Operator, file, new { mapping, sourceSystem = "ponto" })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await DrainAsync();
+        var notMatched = (await RowsAsync(team.Operator, otherSystem)).Single();
+        Assert.Equal(JsonValueKind.Null, notMatched.GetProperty("matchPersonId").ValueKind);
+        Assert.Equal(PreviewKinds.PossibleDuplicate, notMatched.GetProperty("kind").GetString());
     }
 
     // Planilha

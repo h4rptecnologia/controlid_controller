@@ -12,7 +12,8 @@ using Platform.Shared.Storage;
 
 namespace Platform.Modules.Importation;
 
-public sealed record CreateImportRunRequest(Guid? DeviceId, TabularMapping? Mapping, Dictionary<string, string>? FieldPolicy);
+/// <param name="SourceSystem">Sistema de origem do arquivo. Com ele, o ID da fonte concilia pela chave externa.</param>
+public sealed record CreateImportRunRequest(Guid? DeviceId, TabularMapping? Mapping, Dictionary<string, string>? FieldPolicy, string? SourceSystem = null);
 
 /// <param name="Lines">Linhas escolhidas. Sem elas, vale para todas as linhas de <paramref name="Kind"/>.</param>
 public sealed record ImportDecisionRequest(IReadOnlyList<long>? Lines, string? Kind, string? Decision, Guid? PersonId);
@@ -22,7 +23,7 @@ public sealed record ApproveImportRequest(string? PreviewDigest, bool Acknowledg
 public sealed record CloseImportRunRequest(string? Reason);
 
 /// <summary>O que a aprovacao autoriza. Nao ha acao fisica nem envio a equipamento neste fluxo.</summary>
-public sealed record ImportPlan(long Add, long Update, long Unchanged, long Skipped, long Invalid, long PendingReferences, long Biometrics, long CredentialsNotCompared, long NewEvents, long EventsNotCompared);
+public sealed record ImportPlan(long Add, long Update, long Unchanged, long Skipped, long Invalid, long PendingReferences, long Biometrics, long NewCredentials, long CredentialsNotCompared, long NewEvents, long EventsNotCompared);
 
 public sealed record ImportRunResponse(
     Guid Id,
@@ -120,6 +121,11 @@ public static class ImportRunEndpoints
             return Problems.Invalid("Política de conflito inválida.");
         }
 
+        if (body.SourceSystem is { Length: 0 or > 64 })
+        {
+            return Problems.Invalid("O sistema de origem deve ter até 64 caracteres.");
+        }
+
         if (body.Mapping is not null && TabularMappingRules.Validate(body.Mapping) is { } mappingProblem)
         {
             return Problems.Invalid(mappingProblem);
@@ -167,8 +173,8 @@ public static class ImportRunEndpoints
 
                 var runId = await tx.QuerySingleOrDefaultAsync<Guid?>(
                     """
-                    INSERT INTO hub.import_runs (tenant_id, file_id, status, dry_run, created_by, device_id, mapping, field_policy)
-                    VALUES (@TenantId, @id, 'queued', true, @actor, @device, @mapping::jsonb, @policy::jsonb)
+                    INSERT INTO hub.import_runs (tenant_id, file_id, status, dry_run, created_by, device_id, mapping, field_policy, source_system)
+                    VALUES (@TenantId, @id, 'queued', true, @actor, @device, @mapping::jsonb, @policy::jsonb, @system)
                     ON CONFLICT (tenant_id, file_id) WHERE status IN ('queued', 'processing', 'preview_ready', 'awaiting_approval') DO NOTHING
                     RETURNING id
                     """,
@@ -178,6 +184,7 @@ public static class ImportRunEndpoints
                         id,
                         actor = access.Actor.ActorId,
                         device = body.DeviceId,
+                        system = body.SourceSystem,
                         mapping = body.Mapping is null ? null : JsonSerializer.Serialize(body.Mapping, Json),
                         policy = JsonSerializer.Serialize(body.FieldPolicy ?? [], Json),
                     });
@@ -382,11 +389,12 @@ public static class ImportRunEndpoints
                     WHERE x.run_id = @id
                       AND x.result_kind = ANY(@kinds)
                       AND (x.line_no = ANY(@lines) OR x.result_kind = @kind)
+                      AND NOT (@decision = 'accept_source' AND @otherPerson = ANY(x.error_codes))
                       AND (@person::uuid IS NULL OR x.sanitized_preview -> 'candidates' @> jsonb_build_array(jsonb_build_object('personId', @person::text)))
                     ON CONFLICT (tenant_id, run_id, line_no, source_object)
                     DO UPDATE SET decision = EXCLUDED.decision, person_id = EXCLUDED.person_id, decided_by = EXCLUDED.decided_by, decided_at = now()
                     """,
-                    new { decision = body.Decision, person = body.PersonId, actor = access.Actor.ActorId, id, kinds, lines = lines ?? [], kind = body.Kind });
+                    new { decision = body.Decision, person = body.PersonId, actor = access.Actor.ActorId, id, kinds, lines = lines ?? [], kind = body.Kind, otherPerson = PreviewCodes.CredentialOfOtherPerson });
 
                 if (lines is { Length: > 0 } && applied != lines.Length)
                 {
@@ -716,6 +724,7 @@ public static class ImportRunEndpoints
             invalid + stats.InvalidRowsNotStored,
             stats.PendingReferences.Values.Sum(),
             stats.BiometricsExcluded,
+            stats.Credentials.Values.Sum(c => c.New),
             stats.CredentialsNotCompared.Values.Sum(),
             stats.Events.New,
             stats.Events.NotCompared);

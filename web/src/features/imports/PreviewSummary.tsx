@@ -6,7 +6,11 @@ function total(values: Record<string, number>): number {
 
 /** O que esta prévia NAO compara fica escrito: contagem sem comparação não pode parecer conclusão. */
 export function PreviewSummary({ stats }: { stats: PreviewStats }) {
-  const credentials = total(stats.credentialsNotCompared)
+  const notCompared = total(stats.credentialsNotCompared)
+  const compared = Object.values(stats.credentials)
+  const newCredentials = compared.reduce((sum, item) => sum + item.new, 0)
+  const sameCredentials = compared.reduce((sum, item) => sum + item.samePerson, 0)
+  const otherCredentials = compared.reduce((sum, item) => sum + item.otherPerson, 0)
   const pending = total(stats.pendingReferences)
   const others = total(stats.otherObjects)
   const { events } = stats
@@ -18,9 +22,19 @@ export function PreviewSummary({ stats }: { stats: PreviewStats }) {
           <strong>{stats.biometricsExcluded.toLocaleString('pt-BR')} biometrias</strong> ficam de fora por política: não serão importadas.
         </li>
       )}
-      {credentials > 0 && (
+      {newCredentials + sameCredentials > 0 && (
         <li>
-          <strong>{credentials.toLocaleString('pt-BR')} credenciais</strong> ainda não comparadas com o cadastro nesta versão, e não serão importadas.
+          <strong>Credenciais:</strong> {newCredentials.toLocaleString('pt-BR')} novas e {sameCredentials.toLocaleString('pt-BR')} que já são da mesma pessoa.
+        </li>
+      )}
+      {otherCredentials > 0 && (
+        <li>
+          <strong>{otherCredentials.toLocaleString('pt-BR')} credenciais já pertencem a outra pessoa.</strong> Elas aparecem em Conflitos e só podem ficar de fora.
+        </li>
+      )}
+      {notCompared > 0 && (
+        <li>
+          <strong>{notCompared.toLocaleString('pt-BR')} PINs</strong> não têm como ser comparados, porque PIN não pode ser pesquisado.
         </li>
       )}
       {events.total > 0 && (

@@ -2,6 +2,9 @@ import { createRootRoute, createRoute, createRouter, Link } from '@tanstack/reac
 import { AuditPage } from '../features/admin/AuditPage'
 import { parseOutcome } from '../features/admin/auditFilters'
 import { SitesPage } from '../features/admin/SitesPage'
+import { AccessPage } from '../features/access/AccessPage'
+import { PeoplePage } from '../features/people/PeoplePage'
+import { PersonPage } from '../features/people/PersonPage'
 import { ApprovalPage } from '../features/imports/ApprovalPage'
 import { ImportsPage } from '../features/imports/ImportsPage'
 import { ImportWizardPage } from '../features/imports/ImportWizardPage'
@@ -49,8 +52,12 @@ const newImportRoute = createRoute({ getParentRoute: () => rootRoute, path: '/im
 const approvalRoute = createRoute({ getParentRoute: () => rootRoute, path: '/importacoes/aprovacoes/$runId', component: ApprovalPage })
 const wizardRoute = createRoute({ getParentRoute: () => rootRoute, path: '/importacoes/$fileId', component: ImportWizardPage })
 
+const peopleRoute = createRoute({ getParentRoute: () => rootRoute, path: '/pessoas', component: PeoplePage })
+const personRoute = createRoute({ getParentRoute: () => rootRoute, path: '/pessoas/$personId', component: PersonPage })
+const accessRoute = createRoute({ getParentRoute: () => rootRoute, path: '/acesso', component: AccessPage })
+
 export const router = createRouter({
-  routeTree: rootRoute.addChildren([overviewRoute, sitesRoute, auditRoute, importsRoute, newImportRoute, approvalRoute, wizardRoute]),
+  routeTree: rootRoute.addChildren([overviewRoute, sitesRoute, auditRoute, importsRoute, newImportRoute, approvalRoute, wizardRoute, peopleRoute, personRoute, accessRoute]),
   defaultPreload: false,
 })
 

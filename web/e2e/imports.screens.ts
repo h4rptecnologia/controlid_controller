@@ -8,7 +8,8 @@ const OUT = process.env['SCREEN_DIR'] ?? 'test-results/screens'
 
 const STATS = {
   people: { new: 248, update: 0, no_change: 31, field_conflict: 12, possible_duplicate: 2, invalid: 3 },
-  credentialsNotCompared: { cards: 212 },
+  credentials: { cards: { new: 210, samePerson: 0, otherPerson: 2 } },
+  credentialsNotCompared: { pins: 12 },
   biometricsExcluded: 180,
   events: { total: 0, alreadyImported: 0, new: 0, notCompared: 0 },
   otherObjects: {},
@@ -20,7 +21,7 @@ const STATS = {
   parserId: 'controlid_doc_v1',
 }
 
-const PLAN = { add: 248, update: 12, unchanged: 31, skipped: 2, invalid: 3, pendingReferences: 2, biometrics: 180, credentialsNotCompared: 212, newEvents: 0, eventsNotCompared: 0 }
+const PLAN = { add: 248, update: 12, unchanged: 31, skipped: 2, invalid: 3, pendingReferences: 2, biometrics: 180, newCredentials: 210, credentialsNotCompared: 12, newEvents: 0, eventsNotCompared: 0 }
 
 const RUN = {
   id: RUN_ID, fileId: FILE_ID, siteId: 's1', originalName: 'users.zip', sourceFormat: 'controlid_users_zip', status: 'preview_ready', dryRun: true, errorCode: null, deviceId: null,

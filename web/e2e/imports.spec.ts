@@ -50,7 +50,8 @@ function file(partial: Partial<ImportFile> = {}): ImportFile {
 
 const STATS: PreviewStats = {
   people: { new: 1, field_conflict: 1, possible_duplicate: 1, invalid: 1 },
-  credentialsNotCompared: { cards: 2 },
+  credentials: { cards: { new: 2, samePerson: 0, otherPerson: 1 } },
+  credentialsNotCompared: { pins: 1 },
   biometricsExcluded: 3,
   events: { total: 0, alreadyImported: 0, new: 0, notCompared: 0 },
   otherObjects: {},
@@ -62,7 +63,7 @@ const STATS: PreviewStats = {
   parserId: 'controlid_doc_v1',
 }
 
-const PLAN: ImportPlan = { add: 1, update: 1, unchanged: 0, skipped: 1, invalid: 1, pendingReferences: 0, biometrics: 3, credentialsNotCompared: 2, newEvents: 0, eventsNotCompared: 0 }
+const PLAN: ImportPlan = { add: 1, update: 1, unchanged: 0, skipped: 1, invalid: 1, pendingReferences: 0, biometrics: 3, newCredentials: 2, credentialsNotCompared: 1, newEvents: 0, eventsNotCompared: 0 }
 
 function run(partial: Partial<ImportRun> = {}): ImportRun {
   return {
@@ -318,7 +319,9 @@ test('previa mostra categorias, mascara dados e bloqueia o envio ate decidir', a
 
   await expect(page.getByRole('heading', { name: 'Prévia' })).toBeVisible()
   await expect(page.getByText('3 biometrias')).toBeVisible()
-  await expect(page.getByText('2 credenciais')).toBeVisible()
+  await expect(page.getByText('2 novas e 0 que já são da mesma pessoa')).toBeVisible()
+  await expect(page.getByText('1 credenciais já pertencem a outra pessoa.')).toBeVisible()
+  await expect(page.getByText('1 PINs')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Enviar para aprovação' })).toBeDisabled()
   await expect(page.getByText('Faltam 2 decisões')).toBeVisible()
   await expect(page.getByText('de N*** A***** para A** S****')).toBeVisible()
