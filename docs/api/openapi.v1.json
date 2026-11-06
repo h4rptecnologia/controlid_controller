@@ -1578,6 +1578,66 @@
           }
         }
       }
+    },
+    "/api/v1/imports/{id}/unlock": {
+      "post": {
+        "tags": [
+          "Imports"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlockPackageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportFileResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2405,7 +2465,11 @@
           "entryCount",
           "uncompressedBytes",
           "createdAt",
-          "inspectedAt"
+          "inspectedAt",
+          "sourceFormat",
+          "firmwareLine",
+          "parserStatus",
+          "analysis"
         ],
         "type": "object",
         "properties": {
@@ -2487,6 +2551,31 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "sourceFormat": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "firmwareLine": {
+            "type": "string"
+          },
+          "parserStatus": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "analysis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JsonElement"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -2611,6 +2700,21 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UnlockPackageRequest": {
+        "required": [
+          "password"
+        ],
+        "type": "object",
+        "properties": {
+          "password": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         },
         "additionalProperties": false

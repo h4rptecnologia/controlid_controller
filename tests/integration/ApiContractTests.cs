@@ -176,6 +176,7 @@ public sealed class IdempotencyTests(PostgresFixture fixture) : IDisposable
         [
             "/api/v1/keys/{purpose}/rewrap",
             "/api/v1/imports/{id:guid}/content",
+            "/api/v1/imports/{id:guid}/unlock",
             "/api/v1/gateways/",
             "/api/v1/gateways/{id:guid}/enrollment-token",
             "/api/v1/devices/{id:guid}/credential",

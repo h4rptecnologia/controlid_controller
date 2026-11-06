@@ -111,6 +111,274 @@ public sealed class ImportQuarantineTests(PostgresFixture postgres, StorageFixtu
         }
     }
 
+    // Pacote proprio
+
+    private const string PackagePassword = "senha-do-pacote-MARCADORSENHA";
+
+    private static async Task<byte[]> SealAsync(byte[] content)
+    {
+        using var output = new MemoryStream();
+        await HubPackage.SealAsync(new MemoryStream(content), output, PackagePassword, None);
+        return output.ToArray();
+    }
+
+    private static Task<HttpResponseMessage> UnlockAsync(HttpClient client, Guid id, string password) =>
+        client.PostAsJsonAsync(Url($"/api/v1/imports/{id}/unlock"), new { password });
+
+    private async Task<Guid> PackageAwaitingPasswordAsync(HttpClient client, Guid site, byte[] inner)
+    {
+        var id = await UploadAsync(client, site, await SealAsync(inner));
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+        Assert.Equal("awaiting_password", (await GetAsync(client, id)).GetProperty("status").GetString());
+        return id;
+    }
+
+    private async Task<string> BlobRefAsync(Guid tenant, Guid id)
+    {
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT encrypted_blob_ref FROM hub.import_files WHERE tenant_id = @t AND id = @i", connection);
+        command.Parameters.AddWithValue("t", tenant);
+        command.Parameters.AddWithValue("i", id);
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    private async Task<bool> BlobReadableAsync(Guid tenant, string blob)
+    {
+        var store = new EncryptedBlobStore(new S3ObjectStore(s3, StorageFixture.Bucket), new TransitKeyService(kms), new TenantDatabase(workerSource));
+        using var sink = new MemoryStream();
+        return await store.ReadAsync(tenant, Guid.Parse(blob), sink, None);
+    }
+
+    [Fact]
+    public async Task Package_is_never_scanned_while_encrypted_and_the_content_is_inspected_after_opening()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await UploadAsync(client, site, await SealAsync(ValidZip()));
+
+        var closed = new FakeScanner(new ScanResult(ScanVerdict.Clean));
+        await DrainQueueAsync(Worker(closed));
+
+        var waiting = await GetAsync(client, id);
+        Assert.Equal("awaiting_password", waiting.GetProperty("status").GetString());
+        Assert.Equal(DetectedTypes.HubPackage, waiting.GetProperty("detectedType").GetString());
+        Assert.Equal(0, closed.Calls);
+        var packageBlob = await BlobRefAsync(tenant, id);
+
+        var opened = await UnlockAsync(client, id, PackagePassword);
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        Assert.Equal("quarantined", (await opened.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("status").GetString());
+
+        // A copia cifrada com a senha do usuario deixa de existir.
+        Assert.False(await BlobReadableAsync(tenant, packageBlob));
+
+        var scanner = new FakeScanner(new ScanResult(ScanVerdict.Clean));
+        await DrainQueueAsync(Worker(scanner));
+
+        var file = await GetAsync(client, id);
+        Assert.Equal("inspected", file.GetProperty("status").GetString());
+        Assert.Equal("zip", file.GetProperty("detectedType").GetString());
+        Assert.Equal(1, scanner.Calls);
+        Assert.Equal(SourceFormats.Users, file.GetProperty("sourceFormat").GetString());
+        Assert.Equal("undetermined", file.GetProperty("firmwareLine").GetString());
+        Assert.Equal(ParserStatuses.NeedsManualMapping, file.GetProperty("parserStatus").GetString());
+    }
+
+    [Fact]
+    public async Task Malware_inside_a_package_is_caught_after_opening()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        var blob = await BlobRefAsync(tenant, id);
+
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Infected, "Teste.EICAR"))));
+
+        Assert.Equal(RejectionCodes.Malware, (await GetAsync(client, id)).GetProperty("rejectionCode").GetString());
+        Assert.False(await BlobReadableAsync(tenant, blob));
+    }
+
+    [Fact]
+    public async Task Package_inside_a_package_is_rejected()
+    {
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, await SealAsync(ValidZip()));
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+
+        var file = await GetAsync(client, id);
+        Assert.Equal("rejected", file.GetProperty("status").GetString());
+        Assert.Equal(RejectionCodes.NestedPackage, file.GetProperty("rejectionCode").GetString());
+    }
+
+    [Fact]
+    public async Task Repeated_wrong_passwords_destroy_the_package_and_the_right_one_no_longer_works()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        var blob = await BlobRefAsync(tenant, id);
+
+        for (var i = 0; i < 5; i++)
+        {
+            var wrong = await UnlockAsync(client, id, $"senha-errada-numero-{i}");
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, wrong.StatusCode);
+            Assert.Equal("package_open_failed", (await wrong.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        }
+
+        var file = await GetAsync(client, id);
+        Assert.Equal("rejected", file.GetProperty("status").GetString());
+        Assert.Equal(RejectionCodes.TooManyUnlockAttempts, file.GetProperty("rejectionCode").GetString());
+        Assert.False(await BlobReadableAsync(tenant, blob));
+        Assert.Equal(HttpStatusCode.Conflict, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Fewer_than_the_limit_of_wrong_passwords_still_allows_opening()
+    {
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, (await UnlockAsync(client, id, "senha-errada-qualquer")).StatusCode);
+        }
+
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+    }
+
+    [Fact]
+    public async Task Ordinary_file_cannot_be_unlocked()
+    {
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await UploadAsync(client, site, ValidZip());
+
+        Assert.Equal(HttpStatusCode.Conflict, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+    }
+
+    [Fact]
+    public async Task Password_and_cell_values_are_not_persisted_anywhere()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await UnlockAsync(client, id, "MARCADORSENHA-errada-1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        foreach (var table in new[] { "import_files", "audit_log", "idempotency_keys" })
+        {
+            await using var command = new NpgsqlCommand($"SELECT count(*) FROM hub.{table} t WHERE t.tenant_id = @t AND (t::text LIKE '%MARCADORSENHA%' OR t::text LIKE '%MARCADORPESSOAL%')", connection);
+            command.Parameters.AddWithValue("t", tenant);
+            Assert.Equal(0L, await command.ExecuteScalarAsync());
+        }
+
+        var analysis = (await GetAsync(client, id)).GetProperty("analysis");
+        Assert.Equal(2, analysis.GetProperty("columnCount").GetInt32());
+        Assert.Equal(1, analysis.GetProperty("dataRows").GetInt64());
+    }
+
+    [Fact]
+    public async Task Other_tenant_and_other_site_cannot_try_a_password()
+    {
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+
+        var (otherTenant, _, _, _) = await OperatorAsync();
+        Assert.Equal(HttpStatusCode.NotFound, (await UnlockAsync(otherTenant, id, PackagePassword)).StatusCode);
+
+        // Essas tentativas nao gastam o limite do dono: ele ainda abre.
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+    }
+
+    private async Task SetCounterAsync(Guid tenant, Guid id, string column, int value)
+    {
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand($"UPDATE hub.import_files SET {column} = @v WHERE tenant_id = @t AND id = @i", connection);
+        command.Parameters.AddWithValue("v", value);
+        command.Parameters.AddWithValue("t", tenant);
+        command.Parameters.AddWithValue("i", id);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<int> UnlockAttemptsAsync(Guid tenant, Guid id)
+    {
+        await using var connection = new NpgsqlConnection(postgres.AdminOnHubConnection);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("SELECT unlock_attempts FROM hub.import_files WHERE tenant_id = @t AND id = @i", connection);
+        command.Parameters.AddWithValue("t", tenant);
+        command.Parameters.AddWithValue("i", id);
+        return (int)(await command.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
+    public async Task Same_tenant_other_site_cannot_try_a_password_nor_spend_attempts()
+    {
+        var (client, site, tenant, slug) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+
+        var otherSite = await data.SiteAsync(tenant, "Outra");
+        var scoped = await data.ActorAsync((tenant, slug));
+        await data.GrantAsync(scoped, Permissions.ImportCreate, otherSite);
+        using var limited = host.AdminClient(scoped);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await UnlockAsync(limited, id, PackagePassword)).StatusCode);
+        Assert.Equal("awaiting_password", (await GetAsync(client, id)).GetProperty("status").GetString());
+        Assert.Equal(0, await UnlockAttemptsAsync(tenant, id));
+    }
+
+    [Fact]
+    public async Task Exhausted_counter_refuses_even_the_right_password()
+    {
+        // Duas tentativas simultaneas na ultima vaga: a segunda nao chega a derivar.
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        await SetCounterAsync(tenant, id, "unlock_attempts", 5);
+
+        Assert.Equal(HttpStatusCode.Conflict, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Storage_failure_during_unlock_does_not_spend_an_attempt()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        var store = new EncryptedBlobStore(new S3ObjectStore(s3, StorageFixture.Bucket), new TransitKeyService(kms), new TenantDatabase(workerSource));
+        await store.DestroyAsync(tenant, Guid.Parse(await BlobRefAsync(tenant, id)), None);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        Assert.Equal(0, await UnlockAttemptsAsync(tenant, id));
+    }
+
+    [Fact]
+    public async Task Inspection_attempts_of_the_package_do_not_count_against_its_content()
+    {
+        var (client, site, tenant, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        await SetCounterAsync(tenant, id, "inspection_attempts", 3);
+
+        Assert.Equal(HttpStatusCode.OK, (await UnlockAsync(client, id, PackagePassword)).StatusCode);
+        await DrainQueueAsync(Worker(new FakeScanner(new ScanResult(ScanVerdict.Clean))));
+
+        Assert.Equal("inspected", (await GetAsync(client, id)).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Unlock_requires_permission_and_a_password()
+    {
+        var (client, site, _, _) = await OperatorAsync();
+        var id = await PackageAwaitingPasswordAsync(client, site, ValidZip());
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(Url($"/api/v1/imports/{id}/unlock"), new { password = "" })).StatusCode);
+
+        var (reader, _, _, _) = await OperatorAsync(Permissions.GatewaysRead);
+        Assert.Equal(HttpStatusCode.Forbidden, (await UnlockAsync(reader, id, PackagePassword)).StatusCode);
+    }
+
     // Caminho normal
 
     [Fact]

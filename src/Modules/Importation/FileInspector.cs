@@ -27,6 +27,7 @@ public static class DetectedTypes
 {
     public const string Zip = "zip";
     public const string DelimitedText = "delimited_text";
+    public const string HubPackage = "hub_package";
 }
 
 /// <summary>Codigos estaveis de recusa. A interface traduz; o detalhe tecnico nao vai para fora.</summary>
@@ -51,6 +52,8 @@ public static class RejectionCodes
     public const string HashMismatch = "hash_mismatch";
     public const string SizeMismatch = "size_mismatch";
     public const string InspectionFailed = "inspection_failed";
+    public const string NestedPackage = "nested_package";
+    public const string TooManyUnlockAttempts = "too_many_unlock_attempts";
 }
 
 public sealed record InspectionResult(string? DetectedType, string? RejectionCode, int EntryCount, long UncompressedBytes)
@@ -74,7 +77,7 @@ public static class FileInspector
     private const int GeneralPurposeOffset = 8;
     private const ushort EncryptedFlag = 1;
 
-    private static readonly string[] ArchiveExtensions = [".zip", ".rar", ".7z", ".gz", ".tgz", ".tar", ".bz2", ".xz", ".jar", ".cab", ".iso"];
+    private static readonly string[] ArchiveExtensions = [".zip", ".rar", ".7z", ".gz", ".tgz", ".tar", ".bz2", ".xz", ".jar", ".cab", ".iso", ".cidhub"];
 
     public static async Task<InspectionResult> InspectAsync(Stream content, InspectionLimits limits, CancellationToken cancellationToken)
     {
@@ -93,6 +96,11 @@ public static class FileInspector
         content.Position = 0;
         await content.ReadExactlyAsync(sample, cancellationToken);
         content.Position = 0;
+
+        if (HubPackage.HasMagic(sample))
+        {
+            return new InspectionResult(DetectedTypes.HubPackage, null, 0, content.Length);
+        }
 
         try
         {
@@ -268,7 +276,8 @@ public static class FileInspector
             return (RejectionCodes.CorruptArchive, read);
         }
 
-        if (firstLength >= 4 && BinaryPrimitives.ReadInt32LittleEndian(first) == LocalHeaderSignature)
+        // O nome nao decide: conteudo cifrado escondido dentro do ZIP passaria sem o antivirus ver.
+        if (firstLength >= 4 && (BinaryPrimitives.ReadInt32LittleEndian(first) == LocalHeaderSignature || first.AsSpan().SequenceEqual("CIDH"u8)))
         {
             return (RejectionCodes.NestedArchive, read);
         }

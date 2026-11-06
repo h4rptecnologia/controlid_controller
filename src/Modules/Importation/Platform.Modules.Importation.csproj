@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="NSec.Cryptography" />
     <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>
 

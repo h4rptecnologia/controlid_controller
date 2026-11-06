@@ -15,6 +15,8 @@ public sealed record CreateImportRequest(Guid SiteId, string? FileName, long? Si
 
 public sealed record CompleteUploadRequest(string? Sha256);
 
+public sealed record UnlockPackageRequest(string? Password);
+
 /// <param name="OriginalName">Nome saneado, so como informacao: nao decide nada.</param>
 public sealed record ImportFileResponse(
     Guid Id,
@@ -29,7 +31,11 @@ public sealed record ImportFileResponse(
     int? EntryCount,
     long? UncompressedBytes,
     DateTime CreatedAt,
-    DateTime? InspectedAt);
+    DateTime? InspectedAt,
+    string? SourceFormat,
+    string FirmwareLine,
+    string? ParserStatus,
+    System.Text.Json.JsonElement? Analysis);
 
 /// <summary>Recepcao: autenticada, por unidade, em streaming e cifrada desde o primeiro byte. Nao interpreta o conteudo.</summary>
 public static class ImportEndpoints
@@ -39,11 +45,15 @@ public static class ImportEndpoints
         id AS Id, site_id AS SiteId, original_name AS OriginalName, status AS Status, content_size_bytes AS SizeBytes,
         encode(original_sha256, 'hex') AS Sha256, detected_type AS DetectedType, rejection_code AS RejectionCode,
         scan_status AS ScanStatus, entry_count AS EntryCount, uncompressed_bytes AS UncompressedBytes,
-        created_at AS CreatedAt, inspected_at AS InspectedAt
+        created_at AS CreatedAt, inspected_at AS InspectedAt, source_format AS SourceFormat,
+        firmware_line AS FirmwareLine, parser_status AS ParserStatus, analysis::text AS AnalysisText
         """;
 
     private static readonly TimeSpan OriginalRetention = TimeSpan.FromDays(30);
     private static readonly TimeSpan StuckUpload = TimeSpan.FromHours(1);
+    private static readonly SemaphoreSlim UnlockSlots = new(2, 2);
+    private const int MaxUnlockAttempts = 5;
+    private const long InMemoryLimit = 64 * 1024 * 1024;
 
     public static IEndpointRouteBuilder MapImportEndpoints(this IEndpointRouteBuilder routes)
     {
@@ -55,6 +65,9 @@ public static class ImportEndpoints
         // Sem idempotencia por chave: guardar o corpo seria guardar o arquivo. Quem protege e a transicao de estado.
         group.MapPut("/{id:guid}/content", UploadAsync).Produces<ImportFileResponse>().RequireRateLimiting("sensitive").RequirePermission(Permissions.ImportCreate);
         group.MapPost("/{id:guid}/complete-upload", CompleteAsync).Produces<ImportFileResponse>().RequirePermission(Permissions.ImportCreate).RequireIdempotency();
+
+        // Sem idempotencia: o hash da requisicao guardaria algo derivado da senha.
+        group.MapPost("/{id:guid}/unlock", UnlockAsync).Produces<ImportFileResponse>().RequireRateLimiting("sensitive").RequirePermission(Permissions.ImportCreate);
         return routes;
     }
 
@@ -80,7 +93,7 @@ public static class ImportEndpoints
                     return Problems.NotFound();
                 }
 
-                var file = await tx.QuerySingleOrDefaultAsync<ImportFileResponse>(
+                var file = await tx.QuerySingleOrDefaultAsync<ImportFileRow>(
                     $"""
                     INSERT INTO hub.import_files (tenant_id, site_id, uploaded_by, original_name, source_type, declared_size_bytes, status)
                     VALUES (@TenantId, @SiteId, @actor, @name, 'file_upload', @size, 'created')
@@ -89,7 +102,7 @@ public static class ImportEndpoints
                     new { tx.TenantId, body.SiteId, actor = access.Actor.ActorId, name, size });
 
                 await AuditWriter.WriteAsync(tx, new AuditEntry(access.Actor.ActorId, "import.create", "import_file", file!.Id.ToString(), AuditWriter.Success, http.GetCorrelationId()));
-                return Results.Created($"/api/v1/imports/{file.Id}", file);
+                return Results.Created($"/api/v1/imports/{file.Id}", ToResponse(file));
             },
             cancellationToken);
     }
@@ -97,18 +110,19 @@ public static class ImportEndpoints
     private static async Task<IResult> ListAsync(HttpContext http, RequestAccess access, ITenantDatabase database, CancellationToken cancellationToken)
     {
         var scope = http.GetScope();
-        return Results.Ok(await database.InTenantAsync(
+        var rows = await database.InTenantAsync(
             access.Actor.TenantId,
-            tx => tx.QueryAsync<ImportFileResponse>(
+            tx => tx.QueryAsync<ImportFileRow>(
                 $"SELECT {Columns} FROM hub.import_files WHERE (@all OR site_id = ANY(@allowed)) AND NOT site_id = ANY(@denied) ORDER BY created_at DESC, id LIMIT 200",
                 new { all = scope.AllSites, allowed = scope.AllowedSites.ToArray(), denied = scope.DeniedSites.ToArray() }),
-            cancellationToken));
+            cancellationToken);
+        return Results.Ok(rows.Select(ToResponse));
     }
 
     private static async Task<IResult> GetAsync(Guid id, HttpContext http, RequestAccess access, ITenantDatabase database, CancellationToken cancellationToken)
     {
         var file = await FindAsync(database, access.Actor.TenantId, id, cancellationToken);
-        return file is null || !InScope(http, file) ? Problems.NotFound() : Results.Ok(file);
+        return file is null || !InScope(http, file) ? Problems.NotFound() : Results.Ok(ToResponse(file));
     }
 
     private static async Task<IResult> UploadAsync(Guid id, HttpContext http, RequestAccess access, ITenantDatabase database, InspectionLimits limits, CancellationToken cancellationToken)
@@ -169,7 +183,7 @@ public static class ImportEndpoints
             tenant,
             async tx =>
             {
-                var updated = await tx.QuerySingleOrDefaultAsync<ImportFileResponse>(
+                var updated = await tx.QuerySingleOrDefaultAsync<ImportFileRow>(
                     $"""
                     UPDATE hub.import_files
                     SET status = 'uploaded', encrypted_blob_ref = @blob, original_sha256 = @digest, content_size_bytes = @size, encryption_key_ref = 'envelope'
@@ -184,7 +198,7 @@ public static class ImportEndpoints
             },
             CancellationToken.None);
 
-        return Results.Ok(file);
+        return Results.Ok(ToResponse(file!));
     }
 
     private static async Task<IResult> CompleteAsync(Guid id, CompleteUploadRequest body, HttpContext http, RequestAccess access, ITenantDatabase database, CancellationToken cancellationToken)
@@ -212,7 +226,7 @@ public static class ImportEndpoints
             access.Actor.TenantId,
             async tx =>
             {
-                var updated = await tx.QuerySingleOrDefaultAsync<ImportFileResponse>(
+                var updated = await tx.QuerySingleOrDefaultAsync<ImportFileRow>(
                     $"""
                     UPDATE hub.import_files
                     SET status = @status, rejection_code = @rejection
@@ -231,8 +245,165 @@ public static class ImportEndpoints
             await store.DestroyAsync(access.Actor.TenantId, blob, CancellationToken.None);
         }
 
-        return file is null ? Problems.Conflict("O envio deste arquivo já foi concluído.") : Results.Ok(file);
+        return file is null ? Problems.Conflict("O envio deste arquivo já foi concluído.") : Results.Ok(ToResponse(file));
     }
+
+    private static async Task<IResult> UnlockAsync(Guid id, UnlockPackageRequest body, HttpContext http, RequestAccess access, ITenantDatabase database, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(body.Password))
+        {
+            return Problems.Invalid("Informe a senha do pacote.");
+        }
+
+        if (http.RequestServices.GetService<EncryptedBlobStore>() is not { } store)
+        {
+            return Unavailable();
+        }
+
+        var tenant = access.Actor.TenantId;
+        var existing = await FindAsync(database, tenant, id, cancellationToken);
+        if (existing is null || !InScope(http, existing))
+        {
+            return Problems.NotFound();
+        }
+
+        // Argon2 consome muita memoria de proposito: poucas aberturas simultaneas, ou vira negacao de servico.
+        if (!await UnlockSlots.WaitAsync(0, cancellationToken))
+        {
+            return Problems.Of(StatusCodes.Status429TooManyRequests, "rate_limited", "Muitas aberturas em andamento. Tente de novo em instantes.");
+        }
+
+        try
+        {
+            // Conta antes de derivar: tentativas em paralelo nao furam o limite.
+            var attempts = await database.InTenantAsync(
+                tenant,
+                tx => tx.QuerySingleOrDefaultAsync<int?>(
+                    "UPDATE hub.import_files SET unlock_attempts = unlock_attempts + 1 WHERE id = @id AND status = 'awaiting_password' AND unlock_attempts < @max RETURNING unlock_attempts",
+                    new { id, max = MaxUnlockAttempts }),
+                cancellationToken);
+
+            if (attempts is not { } attempt)
+            {
+                return Problems.Conflict("Este arquivo não está aguardando senha.");
+            }
+
+            var blob = await BlobOfAsync(database, tenant, id, cancellationToken);
+            if (blob is not { } packageBlob)
+            {
+                await RefundAttemptAsync(database, tenant, id);
+                return Unavailable();
+            }
+
+            await using var package = NewBuffer(existing.SizeBytes ?? 0);
+            await using var plain = NewBuffer(existing.SizeBytes ?? 0);
+            try
+            {
+                if (!await store.ReadAsync(tenant, packageBlob, package, cancellationToken))
+                {
+                    await RefundAttemptAsync(database, tenant, id);
+                    return Unavailable();
+                }
+
+                package.Position = 0;
+                await HubPackage.OpenAsync(package, plain, body.Password, cancellationToken);
+            }
+            catch (PackageOpenException)
+            {
+                return await FailUnlockAsync(http, access, database, store, id, packageBlob, attempt);
+            }
+            catch (Exception ex) when (ex is KeyServiceException or BlobIntegrityException or IOException or OperationCanceledException or Amazon.S3.AmazonS3Exception or Amazon.Runtime.AmazonClientException)
+            {
+                // A senha nao chegou a ser julgada: a falha e nossa, nao conta contra quem tentou.
+                await RefundAttemptAsync(database, tenant, id);
+                return Unavailable();
+            }
+
+            // O conteudo volta ao inicio da fila como qualquer arquivo novo: inspecao e antivirus valem para ele tambem.
+            plain.Position = 0;
+            BlobReference stored;
+            try
+            {
+                stored = await store.StoreAsync(tenant, BlobKind.ImportOriginal, BlobClassification.Personal, plain, access.Actor.ActorId, DateTimeOffset.UtcNow.Add(OriginalRetention), CancellationToken.None);
+            }
+            catch (Exception ex) when (ex is KeyServiceException or IOException or Amazon.S3.AmazonS3Exception or Amazon.Runtime.AmazonClientException)
+            {
+                await RefundAttemptAsync(database, tenant, id);
+                return Unavailable();
+            }
+
+            var file = await database.InTenantAsync(
+                tenant,
+                async tx =>
+                {
+                    var updated = await tx.QuerySingleOrDefaultAsync<ImportFileRow>(
+                        $"""
+                        UPDATE hub.import_files
+                        SET status = 'quarantined', encrypted_blob_ref = @blob, content_sha256 = @digest, content_size_bytes = @size,
+                            unlocked_from_package = true, inspection_attempts = 0, scan_status = 'not_scanned'
+                        WHERE id = @id AND status = 'awaiting_password'
+                        RETURNING {Columns}
+                        """,
+                        new { blob = stored.Id.ToString(), digest = stored.PlaintextSha256, size = stored.PlaintextSize, id });
+                    if (updated is not null)
+                    {
+                        await AuditWriter.WriteAsync(tx, new AuditEntry(access.Actor.ActorId, "import.unlock", "import_file", id.ToString(), AuditWriter.Success, http.GetCorrelationId()));
+                    }
+
+                    return updated;
+                },
+                CancellationToken.None);
+
+            // Outra abertura venceu a corrida: esta copia em claro nao tem dono.
+            if (file is null)
+            {
+                await store.DestroyAsync(tenant, stored.Id, CancellationToken.None);
+                return Problems.Conflict("Este arquivo não está aguardando senha.");
+            }
+
+            await store.DestroyAsync(tenant, packageBlob, CancellationToken.None);
+            return Results.Ok(ToResponse(file));
+        }
+        finally
+        {
+            UnlockSlots.Release();
+        }
+    }
+
+    private static Task<int> RefundAttemptAsync(ITenantDatabase database, Guid tenant, Guid id) =>
+        database.InTenantAsync(
+            tenant,
+            tx => tx.ExecuteAsync("UPDATE hub.import_files SET unlock_attempts = unlock_attempts - 1 WHERE id = @id AND status = 'awaiting_password' AND unlock_attempts > 0", new { id }),
+            CancellationToken.None);
+
+    private static async Task<IResult> FailUnlockAsync(HttpContext http, RequestAccess access, ITenantDatabase database, EncryptedBlobStore store, Guid id, Guid blob, int attempt)
+    {
+        var exhausted = attempt >= MaxUnlockAttempts;
+        await database.InTenantAsync(
+            access.Actor.TenantId,
+            async tx =>
+            {
+                if (exhausted)
+                {
+                    await tx.ExecuteAsync("UPDATE hub.import_files SET status = 'rejected', rejection_code = @code WHERE id = @id", new { code = RejectionCodes.TooManyUnlockAttempts, id });
+                }
+
+                await AuditWriter.WriteAsync(tx, new AuditEntry(access.Actor.ActorId, "import.unlock", "import_file", id.ToString(), AuditWriter.Denied, http.GetCorrelationId(), Metadata: new { attempt }));
+                return true;
+            },
+            CancellationToken.None);
+
+        if (exhausted)
+        {
+            await store.DestroyAsync(access.Actor.TenantId, blob, CancellationToken.None);
+        }
+
+        return Problems.Of(StatusCodes.Status422UnprocessableEntity, "package_open_failed", new PackageOpenException().Message);
+    }
+
+    private static Stream NewBuffer(long size) => size <= InMemoryLimit
+        ? new MemoryStream()
+        : new FileStream(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
 
     private static async Task<Guid?> BlobOfAsync(ITenantDatabase database, Guid tenant, Guid id, CancellationToken cancellationToken)
     {
@@ -240,11 +411,23 @@ public static class ImportEndpoints
         return Guid.TryParse(text, out var blob) ? blob : null;
     }
 
-    private static Task<ImportFileResponse?> FindAsync(ITenantDatabase database, Guid tenant, Guid id, CancellationToken cancellationToken) =>
-        database.InTenantAsync(tenant, tx => tx.QuerySingleOrDefaultAsync<ImportFileResponse>($"SELECT {Columns} FROM hub.import_files WHERE id = @id", new { id }), cancellationToken);
+    private static Task<ImportFileRow?> FindAsync(ITenantDatabase database, Guid tenant, Guid id, CancellationToken cancellationToken) =>
+        database.InTenantAsync(tenant, tx => tx.QuerySingleOrDefaultAsync<ImportFileRow>($"SELECT {Columns} FROM hub.import_files WHERE id = @id", new { id }), cancellationToken);
 
-    private static bool InScope(HttpContext http, ImportFileResponse file) =>
+    private static bool InScope(HttpContext http, ImportFileRow file) =>
         file.SiteId is { } site && http.GetScope().Includes(site);
+
+    private static ImportFileResponse ToResponse(ImportFileRow row)
+    {
+        System.Text.Json.JsonElement? analysis = null;
+        if (row.AnalysisText is not null)
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(row.AnalysisText);
+            analysis = document.RootElement.Clone();
+        }
+
+        return new ImportFileResponse(row.Id, row.SiteId, row.OriginalName, row.Status, row.SizeBytes, row.Sha256, row.DetectedType, row.RejectionCode, row.ScanStatus, row.EntryCount, row.UncompressedBytes, row.CreatedAt, row.InspectedAt, row.SourceFormat, row.FirmwareLine, row.ParserStatus, analysis);
+    }
 
     private static IResult Unavailable() =>
         Problems.Of(StatusCodes.Status503ServiceUnavailable, "storage_unavailable", "Armazenamento indisponível. O arquivo não foi recebido.");
@@ -262,6 +445,25 @@ public static class ImportEndpoints
         return clean.Length == 0 ? null : clean.Length <= 255 ? clean : clean[..255];
     }
 }
+
+internal sealed record ImportFileRow(
+    Guid Id,
+    Guid? SiteId,
+    string? OriginalName,
+    string Status,
+    long? SizeBytes,
+    string? Sha256,
+    string? DetectedType,
+    string? RejectionCode,
+    string ScanStatus,
+    int? EntryCount,
+    long? UncompressedBytes,
+    DateTime CreatedAt,
+    DateTime? InspectedAt,
+    string? SourceFormat,
+    string FirmwareLine,
+    string? ParserStatus,
+    string? AnalysisText);
 
 internal sealed class UploadTooLargeException : Exception
 {

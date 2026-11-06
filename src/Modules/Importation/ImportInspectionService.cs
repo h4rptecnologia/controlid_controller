@@ -21,6 +21,7 @@ public sealed class ImportInspectionService(
     private const int MaxAttempts = 3;
     private const int MemoryThreshold = 64 * 1024 * 1024;
     private static readonly TimeSpan Stale = TimeSpan.FromMinutes(10);
+    private static readonly System.Text.Json.JsonSerializerOptions AnalysisJson = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     /// <summary>Falso quando a fila esta vazia.</summary>
     public async Task<bool> ProcessNextAsync(CancellationToken cancellationToken)
@@ -41,7 +42,7 @@ public sealed class ImportInspectionService(
         var file = await database.InTenantAsync(
             claimed.TenantId,
             tx => tx.QuerySingleOrDefaultAsync<FileRow>(
-                "SELECT encrypted_blob_ref AS BlobRef, content_size_bytes AS Size FROM hub.import_files WHERE id = @FileId",
+                "SELECT encrypted_blob_ref AS BlobRef, content_size_bytes AS Size, unlocked_from_package AS Unlocked FROM hub.import_files WHERE id = @FileId",
                 new { claimed.FileId }),
             cancellationToken);
 
@@ -59,7 +60,7 @@ public sealed class ImportInspectionService(
 
         try
         {
-            await InspectAsync(claimed, blobId, file.Size ?? 0, cancellationToken);
+            await InspectAsync(claimed, blobId, file.Size ?? 0, file.Unlocked, cancellationToken);
         }
         catch (Exception ex) when (ex is KeyServiceException or IOException or Amazon.S3.AmazonS3Exception or Amazon.Runtime.AmazonClientException or HttpRequestException)
         {
@@ -78,7 +79,7 @@ public sealed class ImportInspectionService(
         return true;
     }
 
-    private async Task InspectAsync(ClaimedFile claimed, Guid blobId, long size, CancellationToken cancellationToken)
+    private async Task InspectAsync(ClaimedFile claimed, Guid blobId, long size, bool unlocked, CancellationToken cancellationToken)
     {
         // Precisa de acesso aleatorio. Acima do limite vai para arquivo temporario em claro, apagado ao fechar:
         // o diretorio temporario do Worker tem de ser privado e, de preferencia, em memoria (tmpfs).
@@ -99,6 +100,27 @@ public sealed class ImportInspectionService(
             return;
         }
 
+        // Cifrado nao tem o que inspecionar: o conteudo volta para esta mesma fila depois de aberto.
+        if (inspection.DetectedType == DetectedTypes.HubPackage)
+        {
+            if (unlocked)
+            {
+                await RejectAsync(claimed, blobId, RejectionCodes.NestedPackage, cancellationToken, inspection.DetectedType);
+                return;
+            }
+
+            await database.InTenantAsync(
+                claimed.TenantId,
+                async tx =>
+                {
+                    await tx.ExecuteAsync("UPDATE hub.import_files SET status = 'awaiting_password', detected_type = @type, inspection_started_at = NULL WHERE id = @FileId", new { type = inspection.DetectedType, claimed.FileId });
+                    await AuditWriter.WriteAsync(tx, new AuditEntry(null, "import.awaiting_password", "import_file", claimed.FileId.ToString(), AuditWriter.Success, null));
+                    return true;
+                },
+                cancellationToken);
+            return;
+        }
+
         var scan = await scanner.ScanAsync(plain, cancellationToken);
         switch (scan.Verdict)
         {
@@ -113,6 +135,8 @@ public sealed class ImportInspectionService(
                 return;
         }
 
+        var analysis = await SourceAnalyzer.AnalyzeAsync(plain, inspection.DetectedType!, new CsvLimits(), cancellationToken);
+
         await database.InTenantAsync(
             claimed.TenantId,
             async tx =>
@@ -121,10 +145,19 @@ public sealed class ImportInspectionService(
                     """
                     UPDATE hub.import_files
                     SET status = 'inspected', detected_type = @DetectedType, entry_count = @EntryCount, uncompressed_bytes = @UncompressedBytes,
-                        scan_status = 'clean', inspected_at = now()
+                        scan_status = 'clean', inspected_at = now(), source_format = @format, parser_status = @parser, analysis = @analysisJson::jsonb
                     WHERE id = @FileId
                     """,
-                    new { inspection.DetectedType, inspection.EntryCount, inspection.UncompressedBytes, claimed.FileId });
+                    new
+                    {
+                        inspection.DetectedType,
+                        inspection.EntryCount,
+                        inspection.UncompressedBytes,
+                        format = analysis.SourceFormat,
+                        parser = analysis.ParserStatus,
+                        analysisJson = System.Text.Json.JsonSerializer.Serialize(analysis, AnalysisJson),
+                        claimed.FileId,
+                    });
                 await AuditWriter.WriteAsync(tx, new AuditEntry(null, "import.inspected", "import_file", claimed.FileId.ToString(), AuditWriter.Success, null));
                 return true;
             },
@@ -159,5 +192,5 @@ public sealed class ImportInspectionService(
 
     private sealed record ClaimedFile(Guid TenantId, Guid FileId, int Attempts);
 
-    private sealed record FileRow(string? BlobRef, long? Size);
+    private sealed record FileRow(string? BlobRef, long? Size, bool Unlocked);
 }
